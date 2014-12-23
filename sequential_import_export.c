@@ -162,3 +162,10 @@ void copyImage(struct image* fromImage,struct image* toImage)
 		}
 	}
 }
+
+void swapImage(struct image** fromImage,struct image** toImage)
+{
+	struct image* temp = *fromImage;
+	*fromImage = *toImage;
+	*toImage = temp;
+}

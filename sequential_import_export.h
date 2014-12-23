@@ -25,6 +25,8 @@ struct image* imageImport(char* fileName);
 void imageExport(struct image* inputImage,char* fileName);
 struct image* initializeImage(struct imageSize* imageSize);
 void copyImage(struct image* fromImage,struct image* toImage);
+void swapImage(struct image** fromImage,struct image** toImage);
+
 
 
 #endif

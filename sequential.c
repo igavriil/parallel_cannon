@@ -16,10 +16,10 @@ int main()
 	struct image* outputImage = initializeImage(inputImage->imageSize);
 
 	int c;
-	for(c=0;c<15;c++)
+	for(c=0;c<35;c++)
 	{
 		imageFilter(inputImage,outputImage);
-		copyImage(outputImage,inputImage);
+		swapImage(&outputImage,&inputImage);
 	}
 
 	imageExport(outputImage,"test_out.txt");
@@ -42,10 +42,6 @@ bool imageFilter(struct image* inputImage,struct image* outputImage)
 			}
 		}
 	}
-	/*
-	 * may possible to repeat iterations without copying Image
-	 */
-	copyImage(outputImage,inputImage);
 
 	return differentPixels;
 }
