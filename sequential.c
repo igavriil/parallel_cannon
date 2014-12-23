@@ -4,46 +4,54 @@
 
 #include "sequential_import_export.h"
 
-int applyFilter(struct image* inputImage,int i, int j);
+int pixelFilter(struct image* inputImage,int i, int j);
+bool imageFilter(struct image* inputImage,struct image* outputImage);
+
 
 
 int main()
 {
-
 	
-	int i,j;
-	int count = 0;
-	struct image* inputImage = imageImport("small.txt");
+	struct image* inputImage = imageImport("waterfall_grey_1920_2520.txt");
 	struct image* outputImage = initializeImage(inputImage->imageSize);
 
-	bool differentPixels;
-	for(count = 0; count < 10; count ++)
-	//do
+	int c;
+	for(c=0;c<15;c++)
 	{
-		differentPixels = false;
-		for(i=0; i < inputImage->imageSize->height; i++)
-		{
-			for(j=0; j < inputImage->imageSize->width; j++)
-			{
-				outputImage->imageArray[i][j] = applyFilter(inputImage,i,j);
-				if(outputImage->imageArray[i][j] != inputImage->imageArray[i][j])
-				{
-					differentPixels = true;
-				}
-			}
-		}
+		imageFilter(inputImage,outputImage);
 		copyImage(outputImage,inputImage);
-
-		printf("running filter \n");
 	}
-	//while(differentPixels == true);
 
 	imageExport(outputImage,"test_out.txt");
 
 }
 
+bool imageFilter(struct image* inputImage,struct image* outputImage)
+{
+	int i,j;
 
-int applyFilter(struct image* inputImage,int i, int j)
+	bool differentPixels = false;
+	for(i=0; i < inputImage->imageSize->height; i++)
+	{
+		for(j=0; j < inputImage->imageSize->width; j++)
+		{
+			outputImage->imageArray[i][j] = pixelFilter(inputImage,i,j);
+			if(outputImage->imageArray[i][j] != inputImage->imageArray[i][j])
+			{
+				differentPixels = true;
+			}
+		}
+	}
+	/*
+	 * may possible to repeat iterations without copying Image
+	 */
+	copyImage(outputImage,inputImage);
+
+	return differentPixels;
+}
+
+
+int pixelFilter(struct image* inputImage,int i, int j)
 {
 
 	int filter[3][3];
