@@ -16,7 +16,7 @@ int main()
 	struct image* outputImage = initializeImage(inputImage->imageSize);
 
 	int c;
-	for(c=0;c<35;c++)
+	for(c=0;c<500;c++)
 	{
 		imageFilter(inputImage,outputImage);
 		swapImage(&outputImage,&inputImage);
