@@ -4,9 +4,7 @@
 
 int main(int argc, char* argv[]) {
 
-	MPI_Init(&argc, &argv);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
+	
 
 
 	int array_of_sizes[2];
@@ -185,8 +183,232 @@ int main(int argc, char* argv[]) {
 
 
 
+	/* dimensions for the cartesian grid */
+	int ndims = 2;
+	/* number of processes in each dimension */
+	int dims[2];
+
+
+	MPI_Init(&argc, &argv);
+	MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+
+	/* Create a new communication and attach virtual topology (2D Cartesian) */
+	MPI_Cart_create(MPI_COMM_WORLD, ndims, dims, periods, 1, &comm_cart);
+
+	/* find out process rank in the grid */
+	MPI_Comm_rank(comm_cart, &myGridRank);
+	/* find out process coordinates in the grid */
+	MPI_Cart_coords(comm_cart, myGridRank, ndims, coords);
+
+
+	
+	/* an MPI error, instead the error will be returned so we can handle it */
+	MPI_Errhandler_get(comm_cart, &errHandler);
+	if (errHandler == MPI_ERRORS_ARE_FATAL) {
+		MPI_Errhandler_set(comm_cart, MPI_ERRORS_RETURN);
+	}
+
+	/* locate neighboring processes in the grid and initiate a send-receive
+	 * operation for each neighbor found */
+
+	/* process (x-1,y) */
+	nextCoords[0] = coords[0] - 1;
+	nextCoords[1] = coords[1];
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_LEFT, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_LEFT, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+	}
+
+	/* process (x-1,y) */
+	nextCoords[0] = coords[0] + 1;
+	nextCoords[1] = coords[1];
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_RIGHT, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_RIGHT, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+	}
+
+	/* process (x-1,y) */
+	nextCoords[0] = coords[0];
+	nextCoords[1] = coords[1] - 1;
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_TOP, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_TOP, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+	}
+
+	/* process (x-1,y) */
+	nextCoords[0] = coords[0];
+	nextCoords[1] = coords[1] + 1;
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_BOTTOM, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_BOTTOM, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+	}
+
+	/* process (x-1,y) */
+	nextCoords[0] = coords[0] + 1;
+	nextCoords[1] = coords[1] + 1;
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_BOTTOM_RIGHT, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_BOTTOM_RIGHT, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+	}
+
+	/* process (x-1,y) */
+	nextCoords[0] = coords[0] + 1;
+	nextCoords[1] = coords[1] - 1;
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_TOP_RIGHT, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_TOP_RIGHT, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+	}
+
+	/* process (x-1,y) */
+	nextCoords[0] = coords[0] - 1;
+	nextCoords[1] = coords[1] + 1;
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_BOTTOM_LEFT, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_BOTTOM_LEFT, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+	}
+
+	/* process (x-1,y) */
+	nextCoords[0] = coords[0] - 1;
+	nextCoords[1] = coords[1] - 1;
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_TOP_LEFT, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_TOP_LEFT, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+	}
 
 
 	MPI_Finalize();
 
+}
+
+
+
+
+
+
+
+int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
+	if (argv[1] != NULL && strcmp(argv[1], "-nodes") == 0) {
+		if (argv[2] != NULL && argv[3] != NULL) {
+			Nx = atoi(argv[2]);
+			Ny = atoi(argv[3]);
+		} else {
+			if (myRank == 0) {
+				printf(
+						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> ]\n\n");
+			}
+			return 1;
+		}
+	} else {
+		if (myRank == 0) {
+			printf(
+					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+		}
+		return 1;
+	}
+
+	/* allocate processes to each dimension. */
+	if (argv[4] != NULL && strcmp(argv[4], "-procs") == 0) {
+		if (argv[5] != NULL && argv[6] != NULL) {
+			dims[0] = (int) atoi(argv[5]);
+			dims[1] = (int) atoi(argv[6]);
+		} else {
+			if (myRank == 0) {
+				printf(
+						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+								" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+			}
+			return 1;
+		}
+	} else {
+		if (myRank == 0) {
+			printf(
+					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+		}
+		return 1;
+	}
+
+	/* Grid of processes size must equal total number of processes */
+	if (dims[0] * dims[1] != p) {
+		if (myRank == 0) {
+			printf("\nProcessing grid size must equal total number of processes"
+					" (np = i*j).\n\n");
+		}
+		return 1;
+	}
+
+	/* specify number of iterations */
+	if (argv[7] != NULL && strcmp(argv[7], "-steps") == 0) {
+		if (argv[8] != NULL) {
+			totalSteps = atoi(argv[8]);
+		} else {
+			if (myRank == 0) {
+				printf(
+						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+								" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+			}
+			return 1;
+		}
+	} else {
+		if (myRank == 0) {
+			printf(
+					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+		}
+		return 1;
+	}
+
+	return 0;
 }
