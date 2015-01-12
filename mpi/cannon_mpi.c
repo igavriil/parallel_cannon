@@ -4,8 +4,6 @@
 
 int main(int argc, char* argv[]) {
 
-	
-
 
 	int array_of_sizes[2];
 	int array_of_subsizes[2];
