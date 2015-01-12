@@ -9,10 +9,9 @@ int Nx,Ny,numtasks,totalSteps;
 int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
 
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) 
+{
 
-<<<<<<< HEAD
-=======
 
 	int width,height,rank,myGridRank,errCode, dest, source,tag,sendRequestCount,recvRequestCount;
 	double* data=NULL;
@@ -20,14 +19,10 @@ int main(int argc, char* argv[]) {
 	int coords[2];
 	int nextCoords[2];
 
-
-
-
 	MPI_Comm comm_cart;
 	MPI_Errhandler errHandler;
 	MPI_Request sendRequestArr[8];
 	MPI_Request recvRequestArr[8];
->>>>>>> 6d57e2cd50727a6e92a041309bf14f47e85e719a
 
 	int array_of_sizes[2];
 	int array_of_subsizes[2];
@@ -351,11 +346,6 @@ int main(int argc, char* argv[]) {
 	MPI_Finalize();
 
 }
-
-
-
-
-
 
 
 int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
