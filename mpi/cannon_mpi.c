@@ -2,8 +2,32 @@
 #include <stdlib.h>
 #include <mpi.h>
 
+
+int Nx,Ny,numtasks,totalSteps;
+
+
+int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
+
+
 int main(int argc, char* argv[]) {
 
+<<<<<<< HEAD
+=======
+
+	int width,height,rank,myGridRank,errCode, dest, source,tag,sendRequestCount,recvRequestCount;
+	double* data=NULL;
+	int periods[2];
+	int coords[2];
+	int nextCoords[2];
+
+
+
+
+	MPI_Comm comm_cart;
+	MPI_Errhandler errHandler;
+	MPI_Request sendRequestArr[8];
+	MPI_Request recvRequestArr[8];
+>>>>>>> 6d57e2cd50727a6e92a041309bf14f47e85e719a
 
 	int array_of_sizes[2];
 	int array_of_subsizes[2];
@@ -216,11 +240,11 @@ int main(int argc, char* argv[]) {
 	nextCoords[1] = coords[1];
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_LEFT, dest, tag,
+		MPI_Send_init(&data[0], 1, SEND_TO_LEFT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_LEFT, source, tag,
+		MPI_Recv_init(&data[0], 1, RCV_FROM_LEFT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
@@ -230,11 +254,11 @@ int main(int argc, char* argv[]) {
 	nextCoords[1] = coords[1];
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_RIGHT, dest, tag,
+		MPI_Send_init(&data[0], 1, SEND_TO_RIGHT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_RIGHT, source, tag,
+		MPI_Recv_init(&data[0], 1, RCV_FROM_RIGHT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
@@ -244,11 +268,11 @@ int main(int argc, char* argv[]) {
 	nextCoords[1] = coords[1] - 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_TOP, dest, tag,
+		MPI_Send_init(&data[0], 1, SEND_TO_TOP, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_TOP, source, tag,
+		MPI_Recv_init(&data[0], 1, RCV_FROM_TOP, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
@@ -258,11 +282,11 @@ int main(int argc, char* argv[]) {
 	nextCoords[1] = coords[1] + 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_BOTTOM, dest, tag,
+		MPI_Send_init(&data[0], 1, SEND_TO_BOTTOM, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_BOTTOM, source, tag,
+		MPI_Recv_init(&data[0], 1, RCV_FROM_BOTTOM, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
@@ -272,11 +296,11 @@ int main(int argc, char* argv[]) {
 	nextCoords[1] = coords[1] + 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_BOTTOM_RIGHT, dest, tag,
+		MPI_Send_init(&data[0], 1, SEND_TO_BOTTOM_RIGHT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_BOTTOM_RIGHT, source, tag,
+		MPI_Recv_init(&data[0], 1, RCV_FROM_BOTTOM_RIGHT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
@@ -286,11 +310,11 @@ int main(int argc, char* argv[]) {
 	nextCoords[1] = coords[1] - 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_TOP_RIGHT, dest, tag,
+		MPI_Send_init(&data[0], 1, SEND_TO_TOP_RIGHT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_TOP_RIGHT, source, tag,
+		MPI_Recv_init(&data[0], 1, RCV_FROM_TOP_RIGHT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
@@ -300,11 +324,11 @@ int main(int argc, char* argv[]) {
 	nextCoords[1] = coords[1] + 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_BOTTOM_LEFT, dest, tag,
+		MPI_Send_init(&data[0], 1, SEND_TO_BOTTOM_LEFT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_BOTTOM_LEFT, source, tag,
+		MPI_Recv_init(&data[0], 1, RCV_FROM_BOTTOM_LEFT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
@@ -314,11 +338,11 @@ int main(int argc, char* argv[]) {
 	nextCoords[1] = coords[1] - 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(0, 0, 0)], 1, SEND_TO_TOP_LEFT, dest, tag,
+		MPI_Send_init(&data[0], 1, SEND_TO_TOP_LEFT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0, 0, 0)], 1, RCV_FROM_TOP_LEFT, source, tag,
+		MPI_Recv_init(&data[0], 1, RCV_FROM_TOP_LEFT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
@@ -379,7 +403,7 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 	}
 
 	/* Grid of processes size must equal total number of processes */
-	if (dims[0] * dims[1] != p) {
+	if (dims[0] * dims[1] != numtasks) {
 		if (myRank == 0) {
 			printf("\nProcessing grid size must equal total number of processes"
 					" (np = i*j).\n\n");
