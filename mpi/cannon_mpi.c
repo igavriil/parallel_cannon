@@ -2,11 +2,15 @@
 #include <stdlib.h>
 #include <mpi.h>
 
+#include "sequential_import_export.h"
+
 
 int Nx,Ny,numtasks,totalSteps;
 
 
 int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
+bool imageFilter(struct image* inputImage,struct image* outputImage);
+int pixelFilter(struct image* inputImage,int i, int j);
 
 
 int main(int argc, char* argv[]) {
@@ -32,35 +36,73 @@ int main(int argc, char* argv[]) {
 
 	int sub_dims = 2;
 
-	array_of_sizes[0] = width + 2;
-	array_of_sizes[1] = height + 2;
 
 	/* vertical (x) and horizontal (y) dimensions */
 
+
+
+//loading the image
+
+	struct image* inputImage = imageImport("waterfall_grey_1920_2520.txt");
+	struct image* outputImage = initializeImage(inputImage->imageSize);
+
+	int c;
+	for(c=0;c<500;c++)
+	{
+		imageFilter(inputImage,outputImage);
+		swapImage(&outputImage,&inputImage);
+	}
+
+	imageExport(outputImage,"test_out.txt");
+
+
+//loading the image
+
+
+
+//creating the subarrays
+
+width = (int) ceil((double) (inputImage->imageSize->width / dims[0])); // x
+height = (int) ceil((double) (inputImage->imageSize->height / dims[1])); // y
+
+
+
+//creating the subarrays
+
+
+
+
+
+
+	array_of_sizes[0] = width + 2;
+	array_of_sizes[1] = height + 2;
+
+
+
 	/* slice to be sent to right neighbor (X-axis) */
 	MPI_Datatype SEND_TO_RIGHT;
-	array_of_subsizes[0] = 1;
-	array_of_subsizes[1] = height;
-	array_of_starts[0] = width;
-	array_of_starts[1] = 1;
+	array_of_subsizes[0] = height;
+	array_of_subsizes[1] = 1;
+	array_of_starts[0] = 1;
+	array_of_starts[1] = width;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &SEND_TO_RIGHT);
 	MPI_Type_commit(&SEND_TO_RIGHT);
 
 	/* slice to be received from right neighbor (X-axis) */
 	MPI_Datatype RCV_FROM_RIGHT;
-	array_of_subsizes[0] = 1;
-	array_of_subsizes[1] = height;
-	array_of_starts[0] = width + 1;
-	array_of_starts[1] = 1;
+	array_of_subsizes[0] = height;
+	array_of_subsizes[1] = 1;
+	array_of_starts[0] = 1;
+	array_of_starts[1] = width + 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_DOUBLE, &RCV_FROM_RIGHT);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &RCV_FROM_RIGHT);
 	MPI_Type_commit(&RCV_FROM_RIGHT);
 
 	/* slice to be sent to left neighbor (X-axis) */
 	MPI_Datatype SEND_TO_LEFT;
-	array_of_subsizes[0] = 1;
-	array_of_subsizes[1] = height;
+	array_of_subsizes[0] = height;
+	array_of_subsizes[1] = 1;
 	array_of_starts[0] = 1;
 	array_of_starts[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
@@ -69,19 +111,19 @@ int main(int argc, char* argv[]) {
 
 	/* slice to be received from left neighbor (X-axis) */
 	MPI_Datatype RCV_FROM_LEFT;
-	array_of_subsizes[0] = 1;
-	array_of_subsizes[1] = height;
-	array_of_starts[0] = 0;
-	array_of_starts[1] = 1;
+	array_of_subsizes[0] = height;
+	array_of_subsizes[1] = 1;
+	array_of_starts[0] = 1;
+	array_of_starts[1] = 0;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_DOUBLE, &RCV_FROM_LEFT);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &RCV_FROM_LEFT);
 	MPI_Type_commit(&RCV_FROM_LEFT);
 
 
 	/* slice to be sent to top neighbor (Y-axis) */
 	MPI_Datatype SEND_TO_TOP;
-	array_of_subsizes[0] = width;
-	array_of_subsizes[1] = 1;
+	array_of_subsizes[0] = 1;
+	array_of_subsizes[1] = width;
 	array_of_starts[0] = 1;
 	array_of_starts[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
@@ -90,32 +132,32 @@ int main(int argc, char* argv[]) {
 
 	/* slice to be received from top neighbor (Y-axis) */
 	MPI_Datatype RCV_FROM_TOP;
-	array_of_subsizes[0] = width;
-	array_of_subsizes[1] = 1;
-	array_of_starts[0] = 1;
-	array_of_starts[1] = 0;
+	array_of_subsizes[0] = 1;
+	array_of_subsizes[1] = width;
+	array_of_starts[0] = 0;
+	array_of_starts[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_DOUBLE, &RCV_FROM_TOP);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &RCV_FROM_TOP);
 	MPI_Type_commit(&RCV_FROM_TOP);
 
 	/* slice to be sent to bottom, neighbor (Y-axis) */
 	MPI_Datatype SEND_TO_BOTTOM;
-	array_of_subsizes[0] = width;
-	array_of_subsizes[1] = 1;
-	array_of_starts[0] = 1;
-	array_of_starts[1] = height;
+	array_of_subsizes[0] = 1;
+	array_of_subsizes[1] = width;
+	array_of_starts[0] = height;
+	array_of_starts[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &SEND_TO_BOTTOM);
 	MPI_Type_commit(&SEND_TO_BOTTOM);
 
 	/* slice to be received from bottom neighbor (Y-axis) */
 	MPI_Datatype RCV_FROM_BOTTOM;
-	array_of_subsizes[0] = width;
-	array_of_subsizes[1] = 1;
+	array_of_subsizes[0] = 1;
+	array_of_subsizes[1] = width;
 	array_of_starts[0] = height + 1;
-	array_of_starts[1] = 0;
+	array_of_starts[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_DOUBLE, &RCV_FROM_BOTTOM);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &RCV_FROM_BOTTOM);
 	MPI_Type_commit(&RCV_FROM_BOTTOM);
 
 	/* diagonal dimensions (xy) */
@@ -124,8 +166,8 @@ int main(int argc, char* argv[]) {
 	MPI_Datatype SEND_TO_TOP_RIGHT;
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = 1;
-	array_of_starts[0] = width;
-	array_of_starts[1] = 1;
+	array_of_starts[0] = 1;
+	array_of_starts[1] = width;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &SEND_TO_TOP_RIGHT);
 	MPI_Type_commit(&SEND_TO_TOP_RIGHT);
@@ -134,10 +176,10 @@ int main(int argc, char* argv[]) {
 	MPI_Datatype RCV_FROM_TOP_RIGHT;
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = 1;
-	array_of_starts[0] = width + 1;
-	array_of_starts[1] = 0;
+	array_of_starts[0] = 0;
+	array_of_starts[1] = width+1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_DOUBLE, &RCV_FROM_TOP_RIGHT);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &RCV_FROM_TOP_RIGHT);
 	MPI_Type_commit(&RCV_FROM_TOP_RIGHT);
 
 	/* slice to be sent to top-left neighbor (XY-axis) */
@@ -157,15 +199,15 @@ int main(int argc, char* argv[]) {
 	array_of_starts[0] = 0;
 	array_of_starts[1] = 0;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_DOUBLE, &RCV_FROM_TOP_LEFT);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &RCV_FROM_TOP_LEFT);
 	MPI_Type_commit(&RCV_FROM_TOP_LEFT);
 
 	/* slice to be sent to bottom-rigth neighbor (XY-axis) */
 	MPI_Datatype SEND_TO_BOTTOM_RIGHT;
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = 1;
-	array_of_starts[0] = width;
-	array_of_starts[1] = height;
+	array_of_starts[0] = height;
+	array_of_starts[1] = width;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &SEND_TO_BOTTOM_RIGHT);
 	MPI_Type_commit(&SEND_TO_BOTTOM_RIGHT);
@@ -174,18 +216,18 @@ int main(int argc, char* argv[]) {
 	MPI_Datatype RCV_FROM_BOTTOM_RIGHT;
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = 1;
-	array_of_starts[0] = width + 1;
-	array_of_starts[1] = height + 1;
+	array_of_starts[0] = height + 1;
+	array_of_starts[1] = width + 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_DOUBLE, &RCV_FROM_BOTTOM_RIGHT);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &RCV_FROM_BOTTOM_RIGHT);
 	MPI_Type_commit(&RCV_FROM_BOTTOM_RIGHT);
 
 	/* slice to be sent to bottom-left neighbor (XY-axis) */
 	MPI_Datatype SEND_TO_BOTTOM_LEFT;
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = 1;
-	array_of_starts[0] = 1;
-	array_of_starts[1] = height;
+	array_of_starts[0] = height;
+	array_of_starts[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &SEND_TO_BOTTOM_LEFT);
 	MPI_Type_commit(&SEND_TO_BOTTOM_LEFT);
@@ -194,10 +236,10 @@ int main(int argc, char* argv[]) {
 	MPI_Datatype RCV_FROM_BOTTOM_LEFT;
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = 1;
-	array_of_starts[0] = 0;
-	array_of_starts[1] = height + 1;
+	array_of_starts[0] = height + 1;
+	array_of_starts[1] = 0;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_DOUBLE, &RCV_FROM_BOTTOM_LEFT);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &RCV_FROM_BOTTOM_LEFT);
 	MPI_Type_commit(&RCV_FROM_BOTTOM_LEFT);
 
 
@@ -345,9 +387,86 @@ int main(int argc, char* argv[]) {
 	}
 
 
+
+
+
+
+
+
+
+
+
+
+
 	MPI_Finalize();
 
 }
+
+
+
+
+
+
+bool imageFilter(struct image* inputImage,struct image* outputImage)
+{
+	int i,j;
+
+	bool differentPixels = false;
+	for(i=0; i < inputImage->imageSize->height; i++)
+	{
+		for(j=0; j < inputImage->imageSize->width; j++)
+		{
+			outputImage->imageArray[i][j] = pixelFilter(inputImage,i,j);
+			if(outputImage->imageArray[i][j] != inputImage->imageArray[i][j])
+			{
+				differentPixels = true;
+			}
+		}
+	}
+
+	return differentPixels;
+}
+
+
+
+
+
+int pixelFilter(struct image* inputImage,int i, int j)
+{
+
+	int filter[3][3];
+	
+	filter[0][0] = 1;
+	filter[0][1] = 2;
+	filter[0][2] = 1;
+	filter[1][0] = 2;
+	filter[1][1] = 4;
+	filter[1][2] = 2;
+	filter[2][0] = 1;
+	filter[2][1] = 2;
+	filter[2][2] = 1;
+
+
+	int k,l;
+	int outPixel = 0;
+
+	for(k=-1;k<=1;k++)
+	{
+		for(l=-1;l<=1;l++)
+		{
+			if ( (i-k)>=0 && (i-k)<inputImage->imageSize->height && (j-l)>=0 && (j-l)<inputImage->imageSize->width )
+			{
+				outPixel += (inputImage->imageArray[i-k][j-l]*filter[k+1][l+1]);
+			}
+			else
+			{
+				outPixel += (inputImage->imageArray[i][j]*filter[k+1][l+1]);
+			}
+		}
+	}
+	return (unsigned short)(outPixel/16);
+}
+
 
 
 
