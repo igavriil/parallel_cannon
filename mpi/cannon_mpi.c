@@ -22,6 +22,7 @@ int main(int argc, char* argv[])
 	int periods[2];
 	int coords[2];
 	int nextCoords[2];
+	char buffer[13];
 
 	MPI_Comm comm_cart;
 	MPI_Errhandler errHandler;
@@ -38,30 +39,45 @@ int main(int argc, char* argv[])
 	/* vertical (x) and horizontal (y) dimensions */
 
 
-
-//loading the image
-
-	struct image* inputImage = imageImport("waterfall_grey_1920_2520.txt");
-	struct image* outputImage = initializeImage(inputImage->imageSize);
-
-	int c;
-	for(c=0;c<500;c++)
-	{
-		imageFilter(inputImage,outputImage);
-		swapImage(&outputImage,&inputImage);
-	}
-
-	imageExport(outputImage,"test_out.txt");
+	/* dimensions for the cartesian grid */
+	int ndims = 2;
+	/* number of processes in each dimension */
+	int dims[2];
 
 
-//loading the image
+	MPI_Init(&argc, &argv);
+	MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 
+	/* Create a new communication and attach virtual topology (2D Cartesian) */
+	MPI_Cart_create(MPI_COMM_WORLD, ndims, dims, periods, 1, &comm_cart);
 
-//creating the subarrays
+	/* find out process rank in the grid */
+	MPI_Comm_rank(comm_cart, &myGridRank);
+	/* find out process coordinates in the grid */
+	MPI_Cart_coords(comm_cart, myGridRank, ndims, coords);
 
-width = (int) ceil((double) (inputImage->imageSize->width / dims[0])); // x
-height = (int) ceil((double) (inputImage->imageSize->height / dims[1])); // y
+
+	//creating the subarrays
+	width = (int) ceil((double) (inputImage->imageSize->width / dims[0])); // x
+	height = (int) ceil((double) (inputImage->imageSize->height / dims[1])); // y
+
+	data = calloc((width + 2) * (height + 2), sizeof(unsigned char));
+	results = calloc((width + 2) * (height + 2), sizeof(unsigned char));
+
+	FILE* inputImage;
+	
+	inputImage = fopen(".raw","rb");
+	snprintf(buffer, 13, "%d", Ny*x+y );
+	strcat(buffer,".raw");
+
+	/* find process rank using the cartesian coordinates and assigh the appropiate
+	part of image previously splitted 
+	*/
+	fread(Image,4838400/(Nx*Ny),1,inputImage);
+
+	fclose(inputImage);
 
 
 
@@ -242,24 +258,7 @@ height = (int) ceil((double) (inputImage->imageSize->height / dims[1])); // y
 
 
 
-	/* dimensions for the cartesian grid */
-	int ndims = 2;
-	/* number of processes in each dimension */
-	int dims[2];
 
-
-	MPI_Init(&argc, &argv);
-	MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-
-	/* Create a new communication and attach virtual topology (2D Cartesian) */
-	MPI_Cart_create(MPI_COMM_WORLD, ndims, dims, periods, 1, &comm_cart);
-
-	/* find out process rank in the grid */
-	MPI_Comm_rank(comm_cart, &myGridRank);
-	/* find out process coordinates in the grid */
-	MPI_Cart_coords(comm_cart, myGridRank, ndims, coords);
 
 
 	
@@ -387,21 +386,10 @@ height = (int) ceil((double) (inputImage->imageSize->height / dims[1])); // y
 
 
 
-
-
-
-
-
-
-
-
-
 	MPI_Finalize();
 
 }
 
-
-<<<<<<< HEAD
 
 
 
@@ -469,12 +457,6 @@ int pixelFilter(struct image* inputImage,int i, int j)
 
 
 
-
-
-
-
-=======
->>>>>>> c40f087eb5081c912b708d14b765c87afa0c9468
 int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 	if (argv[1] != NULL && strcmp(argv[1], "-nodes") == 0) {
 		if (argv[2] != NULL && argv[3] != NULL) {
