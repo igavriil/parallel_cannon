@@ -21,7 +21,7 @@ int main(int argc,char *argv[])
 
 	FILE* inputImage;
 	FILE* outputImage;
-
+ 
 	inputImage = fopen("../waterfall_grey_1920_2520.raw","rb");
 	fread(Image,4838400,1,inputImage);
 
@@ -36,24 +36,31 @@ int main(int argc,char *argv[])
 			strcat(buffer,".raw");
 
 			outputImage = fopen(buffer,"w+");
-
+			
+			for(j =0; j<(1920/Nx)+2; j++)
+			{
+				putc(0,outputImage);
+			}
 			for(i=y*2520/Ny;i<(y+1)*2520/Ny;i++)
 			{
 				for(j=x*1920/Nx;j<(x+1)*1920/Nx;j++)
 				{
+					if(j == x*1920/Nx)
+					{
+						putc(0,outputImage);
+					}
 					putc(Image[1920*i+j],outputImage);
+					if(j ==  ((x+1)*1920/Nx)-1 )
+					{
+						putc(0,outputImage);
+					}
 				}
+			}
+			for(j =0; j<(1920/Nx)+2; j++)
+			{
+				putc(0,outputImage);
 			}
 			fclose(outputImage);
 		}
 	}
-
-
-	
-	
-
-	/*
-	
-	*/
-	
 }

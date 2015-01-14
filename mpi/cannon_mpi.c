@@ -17,7 +17,7 @@ int main(int argc, char* argv[])
 {
 
 
-	int width,height,rank,myGridRank,errCode, dest, source,tag,sendRequestCount,recvRequestCount;
+	int width,height,rank,myGridRank,errCode, dest, source,tag,sendRequestCount,recvRequestCount,i,j;
 	double* data=NULL;
 	int periods[2];
 	int coords[2];
@@ -68,20 +68,24 @@ int main(int argc, char* argv[])
 
 	FILE* inputImage;
 	
-	inputImage = fopen(".raw","rb");
-	snprintf(buffer, 13, "%d", Ny*x+y );
-	strcat(buffer,".raw");
+	
 
 	/* find process rank using the cartesian coordinates and assigh the appropiate
 	part of image previously splitted 
 	*/
+	snprintf(buffer, 13, "%d", Ny*coords[0]+coords[1]);
+	strcat(buffer,".raw");
+	inputImage = fopen(buffer,"rb");
+	
 	fread(Image,4838400/(Nx*Ny),1,inputImage);
 
 	fclose(inputImage);
 
+	
 
 
-//creating the subarrays
+
+	//creating the subarrays
 
 
 
