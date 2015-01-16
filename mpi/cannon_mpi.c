@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "mpi.h"
+#include <string.h>
+#include <math.h>
+#include <mpi.h>
 
 /* number of processes */
-int numtasks
+int numtasks;
 /* image-grid dimensions */
 int Nx,Ny;
 /* the part of the grid allocate in each process */
@@ -22,9 +24,12 @@ int filter[3][3];
 
 
 int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
-bool imageFilter(struct image* inputImage,struct image* outputImage);
-int pixelFilter(struct image* inputImage,int i, int j);
-
+int offset(int x,int y);
+int innerImageFilter(unsigned char *data,unsigned char* results);
+int outerImageFilter(unsigned char* data, unsigned char* results,int* coords);
+unsigned char innerPixelFilter(unsigned char* data,int i, int j);
+unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag);
+unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag);
 
 int main(int argc, char* argv[]) 
 {
@@ -37,9 +42,9 @@ int main(int argc, char* argv[])
 	/* tag for messages */
 	int tag = 0;
 	/* part of the dataset assigned for the process */
-	double *data = NULL;
+	unsigned char *data = NULL;
 	/* filter calculation results for the process */
-	double *results = NULL;
+	unsigned char *results = NULL;
 	/* determines whether a dimension has cyclic boundaries,
 	 * meaning the 2 edge processes are connected  */
 	int periods[2];
@@ -96,7 +101,7 @@ int main(int argc, char* argv[])
 	MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
 
 	/* if uncorrect arguments are passed finalize MPI */
-	if (parseCmdROWArgs(argc, argv, dims, myRank) == 1) {
+	if (parseCmdLineArgs(argc, argv, dims, myRank) == 1) {
 		MPI_Finalize();
 		return 1;
 	}
@@ -110,9 +115,9 @@ int main(int argc, char* argv[])
 
 	/* print settings defined for the execution */
 	if (myRank == 0) {
-		printf("\nProblem grid: %dx%dx%d.\n", Nx, Ny, Nz);
-		printf("P = %d processes.\n", p);
-		printf("Sub-grid / process: %dx%dx%d.\n", width, depth, height);
+		printf("\nProblem grid: %dx%d.\n", Nx, Ny);
+		printf("P = %d processes.\n", numtasks);
+		printf("Sub-grid / process: %dx%d.\n", width, height);
 		printf("\nC = %d iterations.\n", totalSteps);
 		printf("Reduction performed every %d iteration(s).\n", reduceFreq);
 	}
@@ -145,15 +150,15 @@ int main(int argc, char* argv[])
 	results = calloc(dataSize, sizeof(unsigned char));
 
 	
-	
-	
-
 	/* find process rank using the cartesian coordinates and assigh the appropiate
 	 * part of image previously splitted 
 	**/
 	FILE* inputImage;
 	snprintf(buffer, 7, "%d", dims[1]*coords[0]+coords[1]);
 	strcat(buffer,".raw");
+
+	printf( "Hello world from process %d i have the string %s\n", myRank, buffer );
+
 	inputImage = fopen(buffer,"rb");
 
 	fread(data,dataSize,1,inputImage);
@@ -179,8 +184,8 @@ int main(int argc, char* argv[])
 	/* slicing a COLUMN from the 2 dimensional array */
 	MPI_Datatype COLUMN;
 	/* a column consists of 2D array with [1] column and [height] rows */
-	array_of_subsizes[0] = height;
-	array_of_subsizes[1] = 1;
+	array_of_subsizes[0] = 1;
+	array_of_subsizes[1] = height;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &COLUMN);
 	/* assing the subarray to the datatype */
@@ -189,8 +194,8 @@ int main(int argc, char* argv[])
 	/* slicing a ROW from the 2 dimensional array */
 	MPI_Datatype ROW;
 	/* a row consists of 2D array with [1] row and [width] columns */
-	array_of_subsizes[0] = 1;
-	array_of_subsizes[1] = width;
+	array_of_subsizes[0] = width;
+	array_of_subsizes[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &ROW);
 	/* assing the subarray to the datatype */
@@ -349,7 +354,7 @@ int main(int argc, char* argv[])
 		recvRequestCount++;
 	}
 
-	while (steps < totalSteps) {
+	while (steps < totalSteps)
 	{
 		steps++;
 		
@@ -358,6 +363,8 @@ int main(int argc, char* argv[])
 
 		/* calculate filter for inner data - no need for communication */
 		innerImageFilter(data,results);
+
+		printf( "Hello world from process %d i have the string compete inner calc\n", myRank);
 
 		/* before continuing to compute outer image make sure all messages 
 		 * are received
@@ -387,7 +394,7 @@ int offset(int x,int y)
 	return x*(width+2)+y;
 }
 
-bool innerImageFilter(unsigned char *data,unsigned char* results)
+int innerImageFilter(unsigned char *data,unsigned char* results)
 {
 	for(j = 2; j < height; j++)
 	{
@@ -396,7 +403,7 @@ bool innerImageFilter(unsigned char *data,unsigned char* results)
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
 		}
 	}
-	return differentPixels;
+	return 1;
 }
 
 unsigned char innerPixelFilter(unsigned char* data,int i, int j)
@@ -422,7 +429,7 @@ unsigned char innerPixelFilter(unsigned char* data,int i, int j)
  *                (-1,-1): TOP-LEFT   |     ( 1,-1): BOTTOM-LEFT  | cornerPixelFilter
  *                (-1, 1): TOP-RIGHT  |     ( 1, 1): BOTTOM-RIGHT |
 **/
-bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
+int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 {
 	int flag[2];
 	/*  
@@ -503,7 +510,7 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	{
 		j = 1; /* first column */
 		flag[0] = 1;
-		flag[1] = -1
+		flag[1] = -1;
 		for(i = 2; i < height; i++)
 		{
 			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
@@ -519,7 +526,7 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	**/
 	if(coords[0] != dims[1] - 1)
 	{
-		j = width; /* [width] column */] 
+		j = width; /* [width] column */
 		for(i = 2; i < height; i++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
@@ -530,7 +537,7 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	**/
 	else
 	{
-		j = width; /* [width] column */]
+		j = width; /* [width] column */
 		flag[0] = 1;
 		flag[1] = 1;
 		for(i = 2; i < height; i++)
@@ -585,6 +592,8 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 
 		results[offset(height,width)] = cornerPixelFilter(data,height,width,flag);
 	}
+
+	return 1;
 }
 
 
@@ -599,7 +608,7 @@ unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag)
 	{
 		for(l=-1;l<=1;l++)
 		{
-			if(((flag[0]==0) && (k==flag[1])) || ((flag[0]==1) && (l==flag[1]))   )
+			if( ((flag[0]==0) && (k==flag[1])) || ((flag[0]==1) && (l==flag[1]))   )
 			{
 				outPixel += (data[offset((i),(j))]*filter[k+1][l+1]);	
 			}
@@ -653,13 +662,13 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		if (myRank == 0) {
 			printf(
 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 		}
 		return 1;
 	}
 
 	/* allocate processes to each dimension. */
-	if (argv[4] != NULL && strcmp(argv[5], "-procs") == 0) {
+	if (argv[4] != NULL && strcmp(argv[4], "-procs") == 0) {
 		if (argv[5] != NULL && argv[6] != NULL) {
 			dims[0] = (int) atoi(argv[5]);
 			dims[1] = (int) atoi(argv[6]);
@@ -675,13 +684,13 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		if (myRank == 0) {
 			printf(
 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 		}
 		return 1;
 	}
 
 	/* Grid of processes size must equal total number of processes */
-	if (dims[0] * dims[1] != p) {
+	if (dims[0] * dims[1] != numtasks) {
 		if (myRank == 0) {
 			printf("\nProcessing grid size must equal total number of processes"
 					" (np = i*j).\n\n");
@@ -705,7 +714,7 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		if (myRank == 0) {
 			printf(
 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 		}
 		return 1;
 	}
@@ -725,9 +734,10 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		if (myRank == 0) {
 			printf(
 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 		}
 		return 1;
 	}
+	
 	return 0;
 }
