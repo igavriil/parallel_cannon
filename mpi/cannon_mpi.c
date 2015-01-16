@@ -2,31 +2,38 @@
 #include <stdlib.h>
 #include <mpi.h>
 
-#include "sequential_import_export.h"
-
-
-int Nx,Ny,numtasks,totalSteps;
+/* number of processes */
+int numtasks
+/* image-grid dimensions */
+int Nx,Ny,totalSteps;
+/* the part of the grid allocate in each process */
 int width,height;
-
 /* number of processes in each dimension */
 int dims[2];
 
-
-int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
+//////////////////////////////////////////////////////////not myRank but rank///
+int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank);
 bool imageFilter(struct image* inputImage,struct image* outputImage);
 int pixelFilter(struct image* inputImage,int i, int j);
 
 
 int main(int argc, char* argv[]) 
 {
-
-
-	int rank,myGridRank,errCode, dest, source,tag,sendRequestCount,recvRequestCount,i,j;
+	/* process rank in MPI_COMM_WORLD communicator */
+	int rank;
+	/* process rank in Cartesian communicator */
+	int myGridRank;
+	/* source and destination rank for communication*/
+	int source,dest;
+	int errCode, sendRequestCount,recvRequestCount,i,j;
+	/* tag for messages */
+	int tag = 0;
 	double* data=NULL;
 	int periods[2];
 	int coords[2];
 	int nextCoords[2];
 	char buffer[13];
+	/* dayasize for each process */
 	int dataSize;
 
 
@@ -47,28 +54,59 @@ int main(int argc, char* argv[])
 
 	/* dimensions for the cartesian grid */
 	int ndims = 2;
-	
-
+	/* start MPI */
 	MPI_Init(&argc, &argv);
+	/* get number of processes used */
 	MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
+	/* get process rank in MPI_COMM_WORLD communicator */
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+	/* if uncorrect arguments are passed finalize MPI */
+	if (parseCmdROWArgs(argc, argv, dims, myRank) == 1) {
+		MPI_Finalize();
+		return 1;
+	}
 
-	/* Create a new communication and attach virtual topology (2D Cartesian) */
+	/* [width, depth] of problem's grid assigned to each
+	 * process, calculated by the total number of nodes in each dimension divided by
+	 * the number of processes assigned to that dimension.
+	**/
+	width = (int) ceil((double) (Nx/ dims[0]));
+	height = (int) ceil((double) (Ny / dims[1]));
+
+	/* print settings defined for the execution */
+	if (myRank == 0) {
+		printf("\nProblem grid: %dx%dx%d.\n", Nx, Ny, Nz);
+		printf("P = %d processes.\n", p);
+		printf("Sub-grid / process: %dx%dx%d.\n", width, depth, height);
+		printf("\nC = %d iterations.\n", totalSteps);
+		printf("Reduction performed every %d iteration(s).\n", reduceFreq);
+	}
+
+	/* There's not communication wraparound in the model. Outter image pixels are
+	 * calulated in a different manner than inner so there is no cyclic boundaries
+	 * in either x and y dimension
+	**/
+	periods[0] = 0;
+	periods[1] = 0;
+
+	/* Create a new communicator and attach virtual topology (2D Cartesian)
+	 * allowing process reordering 
+	**/
 	MPI_Cart_create(MPI_COMM_WORLD, ndims, dims, periods, 1, &comm_cart);
-
-	/* find out process rank in the grid */
+	/* get process rank in grid - Cartesian communicator */
 	MPI_Comm_rank(comm_cart, &myGridRank);
-	/* find out process coordinates in the grid */
+	/* get process coordinates in grid - Cartesian communicator */
 	MPI_Cart_coords(comm_cart, myGridRank, ndims, coords);
 
-
-	//creating the subarrays
-	width = (int) ceil((double) (Nx/ dims[0])); // x
-	height = (int) ceil((double) (Ny / dims[1])); // y
-
+	/* Calculate datasize for the process adding padding for halo points.
+	 * Padding needed for the algorithm is one pixel at each outter pixel
+	**/
 	dataSize = (width+2)*(height+2);
-
+	/* Allocate empty space for data to be read and output data calculated 
+	 * from the filtering algorithm. Data are stored as 1D array in the 
+	 * memory
+	**/ 
 	data = calloc(dataSize, sizeof(unsigned char));
 	results = calloc(dataSize, sizeof(unsigned char));
 
@@ -96,168 +134,190 @@ int main(int argc, char* argv[])
 
 
 
-	//creating the subarrays
-
-
-
-
-
-
+	/* Create three datatypes by defining sections of the original array
+	 * Our array is treated as a 2 dimensional array and we are slicing 
+	 * rows, columns and points having as starting position the initial position (0,0)
+	 * of our array
+	**/
+	/* define the width and height of the array represented as 2 dimensional array
+	 * halo points added to this representation
+	**/
 	array_of_sizes[0] = width + 2;
 	array_of_sizes[1] = height + 2;
-
-
+	/* define the starting position - address for the slices to be cutted. We set 
+	 * those to (0,0) in order to generalize this datatypes
+	**/
 	array_of_starts[0] = 0;
 	array_of_starts[1] = 0;
 
-
-
-	/* slice to be sent to right neighbor (X-axis) */
-	MPI_Datatype ROW;
+	/* slicing a COLUMN from the 2 dimensional array */
+	MPI_Datatype COLUMN;
+	/* a column consists of 2D array with [1] column and [height] rows */
 	array_of_subsizes[0] = height;
 	array_of_subsizes[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &ROW);
-	MPI_Type_commit(&ROW);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &COLUMN);
+	/* assing the subarray to the datatype */
+	MPI_Type_commit(&COLUMN);
 
-	/* slice to be received from right neighbor (X-axis) */
-	MPI_Datatype LINE;
+	/* slicing a ROW from the 2 dimensional array */
+	MPI_Datatype ROW;
+	/* a row consists of 2D array with [1] row and [width] columns */
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = width;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
-			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &LINE);
-	MPI_Type_commit(&LINE);
+			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &ROW);
+	/* assing the subarray to the datatype */
+	MPI_Type_commit(&ROW);
 
-	/* slice to be sent to left neighbor (X-axis) */
+	/* slicing a POINT from the 2 dimensional array */
 	MPI_Datatype POINT;
+	/* a point consists of 2D array with [1] column and [1] rows*/
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = 1;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &POINT);
+	/* assing the subarray to the datatype */
 	MPI_Type_commit(&POINT);
 
-
-
-
-
-
-	
-	/* an MPI error, instead the error will be returned so we can handle it */
+	/* The predefined default error handler, which is
+	 * MPI_ERRORS_ARE_FATAL, for a newly created communicator or
+	 * for MPI_COMM_WORLD is to abort the  whole parallel program
+	 * as soon as any MPI error is detected. By setting the error handler to
+	 * MPI_ERRORS_RETURN  the program will no longer abort on having detected
+	 * an MPI error, instead the error will be returned so we can handle it. 
+	**/
 	MPI_Errhandler_get(comm_cart, &errHandler);
 	if (errHandler == MPI_ERRORS_ARE_FATAL) {
 		MPI_Errhandler_set(comm_cart, MPI_ERRORS_RETURN);
 	}
+	/* Locate neighboring processes in the grid and initiate a send-receive
+	 * operation for each neighbor found 
+	**/
 
-	/* locate neighboring processes in the grid and initiate a send-receive
-	 * operation for each neighbor found */
-
-	/* process (x-1,y) */
+	/* Left Neighboor - process (x-1,y) in the Cartesian! topology */
 	nextCoords[0] = coords[0] - 1;
 	nextCoords[1] = coords[1];
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(1,1)], 1, ROW, dest, tag,
+		/* take the column starting at ([1]-row,[1]-column) address and send */
+		MPI_Send_init(&data[offset(1,1)], 1, COLUMN, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(1,0)], 1, ROW, source, tag,
+		/* set starting position at ([1]-row,[0]-column) and place the received column */
+		MPI_Recv_init(&data[offset(1,0)], 1, COLUMN, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
 
-	/* process (x-1,y) */
+	/* Right Neighboor - process (x-1,y) in the Cartesian! topology */
 	nextCoords[0] = coords[0] + 1;
 	nextCoords[1] = coords[1];
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(1,width)], 1, ROW, dest, tag,
+		/* take the column starting at ([1]-row,[width]-column) address and send */
+		MPI_Send_init(&data[offset(1,width)], 1, COLUMN, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(1,width+1)], 1, ROW, source, tag,
+		/* set starting position at ([1]-row,[width+1]-column) and place the received column */
+		MPI_Recv_init(&data[offset(1,width+1)], 1, COLUMN, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
 
-	/* process (x-1,y) */
+	/* Top Neighboor - process (x,y-1) in the Cartesian! topology */
 	nextCoords[0] = coords[0];
 	nextCoords[1] = coords[1] - 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(1,1)], 1, LINE, dest, tag,
+		/* take the row starting at ([1]-row,[1]-column) address and send */
+		MPI_Send_init(&data[offset(1,1)], 1, ROW, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(0,1)], 1, LINE, source, tag,
+		/* set starting position at ([0]-row,[1]-column) and place the received row */
+		MPI_Recv_init(&data[offset(0,1)], 1, ROW, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
 
-	/* process (x-1,y) */
+	/* Bottom Neighboor - process (x,y+1) in the Cartesian! topology */
 	nextCoords[0] = coords[0];
 	nextCoords[1] = coords[1] + 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
-		MPI_Send_init(&data[offset(height,1)], 1, LINE, dest, tag,
+		/* take the row starting at ([height]-row,[1]-column) address and send */
+		MPI_Send_init(&data[offset(height,1)], 1, ROW, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
-		MPI_Recv_init(&data[offset(height+1,1)], 1, LINE, source, tag,
+		/* set starting position at ([height+1]-row,[1]-column) and place the received row */
+		MPI_Recv_init(&data[offset(height+1,1)], 1, ROW, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
 
-	/* process (x-1,y) */
+	/* Bottom-Right Neighboor - process (x+1,y+1) in the Cartesian! topology */
 	nextCoords[0] = coords[0] + 1;
 	nextCoords[1] = coords[1] + 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
+		/* take the point starting at ([height]-row,[width]-column) address and send */
 		MPI_Send_init(&data[offset(height,width)], 1, POINT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
+		/* set starting position at ([height+1]-row,[width+1]-column) and place the received point */
 		MPI_Recv_init(&data[offset(height+1,width+1)], 1, POINT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
 
-	/* process (x-1,y) */
+	/* Top-Right Neighboor - process (x+1,y-1) in the Cartesian! topology */
 	nextCoords[0] = coords[0] + 1;
 	nextCoords[1] = coords[1] - 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
+		/* take the point starting at ([1]-row,[width]-column) address and send */
 		MPI_Send_init(&data[offset(1,width)], 1, POINT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
+		/* set starting position at ([0]-row,[width+1]-column) and place the received point */
 		MPI_Recv_init(&data[offset(0,width+1)], 1, POINT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
 
-	/* process (x-1,y) */
+	/* Bottom-Left Neighboor - process (x-1,y-1) in the Cartesian! topology */
 	nextCoords[0] = coords[0] - 1;
 	nextCoords[1] = coords[1] + 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
+		/* take the point starting at ([height]-row,[1]-column) address and send */
 		MPI_Send_init(&data[offset(height,1)], 1, POINT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
+		/* set starting position at ([height+1]-row,[0]-column) and place the received point */
 		MPI_Recv_init(&data[offset(height+1,0)], 1, POINT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
 	}
 
-	/* process (x-1,y) */
+	/* Top-Left Neighboor - process (x-1,y-1) in the Cartesian! topology */
 	nextCoords[0] = coords[0] - 1;
 	nextCoords[1] = coords[1] - 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 	if (errCode == MPI_SUCCESS) {
+		/* take the point starting at ([1]-row,[1]-column) address and send */
 		MPI_Send_init(&data[offset(1,1)], 1, POINT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
 		sendRequestCount++;
 		source = dest;
+		/* set starting position at ([0]-row,[0]-column) and place the received point */
 		MPI_Recv_init(&data[offset(0,0)], 1, POINT, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
@@ -304,14 +364,12 @@ int main(int argc, char* argv[])
 
 
 
-
+/* returns the offset of an element in a 2D array of dimensions (width,height) 
+ * allocated in row major order
+**/
 int offset(int x,int y)
 {
-
-
-return x*(width+2)+y;
-
-
+	return x*(width+2)+y;
 }
 
 
@@ -507,7 +565,53 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 
 
 
-//endRight
+
+	//endRight
+
+	//begin top Left
+	if(coords[1]==0 && coords[0]==0)
+	{
+		flag[0] = -1;
+		flag[1] = -1;
+
+		results[offset(1,1)] = cornerPixelFilter(data,1,1,flag);
+	}
+	//end top Left
+
+	//begin top Right
+	if(coords[1]==0 && coords[0]==dims[1] -1)
+	{
+		flag[0] = -1;
+		flag[1] = 1;
+
+		results[offset(1,width)] = cornerPixelFilter(data,1,width,flag);
+	}
+	//end top Right
+
+	//begin bottom left
+	if(coords[1]==dims[0] -1 && coords[0]==0)
+	{
+		flag[0] = 1;
+		flag[1] = -1;
+
+		results[offset(height,1)] = cornerPixelFilter(data,height,1,flag);
+	}
+	//end bottom left
+
+	//begin bottom Right
+	if(coords[1]==dims[0] -1&& coords[0]==dims[1] -1)
+	{
+		flag[0] = 1;
+		flag[1] = 1;
+
+		results[offset(height,width)] = cornerPixelFilter(data,height,width,flag);
+	}77
+	//end bottom Right
+
+
+
+
+
 
 }
 
@@ -551,6 +655,47 @@ unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag)
 					outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
 				}
 				
+		0	}
+		}
+	
+
+
+	return (unsigned char)(outPixel/16);
+}
+
+unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag)
+{
+
+	int filter[3][3];
+	
+	filter[0][0] = 1;
+	filter[0][1] = 2;
+	filter[0][2] = 1;
+	filter[1][0] = 2;
+	filter[1][1] = 4;
+	filter[1][2] = 2;
+	filter[2][0] = 1;
+	filter[2][1] = 2;
+	filter[2][2] = 1;
+
+
+	int k,l;
+	int outPixel = 0;
+
+		for(k=-1;k<=1;k++)
+		{
+			for(l=-1;l<=1;l++)
+			{
+				if(k==flag[0] && l==flag[1])
+				{
+					outPixel += (data[offset((i),(j))]*filter[k+1][l+1]);	
+				}
+
+				else
+				{
+					outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
+				}
+				
 			}
 		}
 	
@@ -564,8 +709,7 @@ unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag)
 
 
 
-
-int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
+int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank) {
 	if (argv[1] != NULL && strcmp(argv[1], "-nodes") == 0) {
 		if (argv[2] != NULL && argv[3] != NULL) {
 			Nx = atoi(argv[2]);
