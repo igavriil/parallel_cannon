@@ -49,6 +49,8 @@ int main(int argc, char* argv[])
 	int nextCoords[2];
 	/* datasize for each process */
 	int dataSize;
+	/* computation steps */
+	int steps = 0; 
 	/* a char buffer needed for concatenation, used to determing what image part
 	 * reads each process 
 	**/
@@ -347,43 +349,32 @@ int main(int argc, char* argv[])
 		recvRequestCount++;
 	}
 
-	for()
+	while (steps < totalSteps) {
 	{
+		steps++;
 		
 		MPI_Startall(sendRequestCount,sendRequestArr);
 		MPI_Startall(recvRequestCount,recvRequestArr);
 
-		//calculate inner
+		/* calculate filter for inner data - no need for communication */
+		innerImageFilter(data,results);
 
-
-
-
+		/* before continuing to compute outer image make sure all messages 
+		 * are received
+		**/
 		MPI_Waitall(recvRequestCount,recvRequestArr,MPI_STATUSES_IGNORE);
 
+		/* calculate filter for outer with the halo points received 
+		 * process coordinates are given in order to detect what part of the image
+		 * the process holds
+		**/
+		outerImageFilter(data,results,coords);
 
-		//comptute outer
-
-
-
-
-
-
-
+		/* ensure all data have been sent successfully sent
+		 * before the next loop iteration */
 		MPI_Waitall(sendRequestCount,sendRequestArr,MPI_STATUSES_IGNORE);
-
-
-
-
-
-
 	}
-
-
-
-
-
 	MPI_Finalize();
-
 }
 
 
@@ -437,9 +428,9 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	/*  
 	 * parse the whole TOP row excluding halo points and filter each pixel
 	**/
-    /* if the TOP part of the process is not a TOP part on the initial image
-     * then process the local data as usual as neighboors on TOP do exist
-    **/
+	/* if the TOP part of the process is not a TOP part on the initial image
+	 * then process the local data as usual as neighboors on TOP do exist
+	**/
 	if(coords[1]!=0)
 	{
 		i = 1; /* first row */
@@ -465,9 +456,9 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	/*  
 	 * parse the whole BOTTOM row excluding halo points and filter each pixel
 	**/
-    /* if the BOTTOM part of the process is not a BOTTOM part on the initial image
-     * then process the local data as usual as neighboors on BOTTOM do exist
-    **/
+	/* if the BOTTOM part of the process is not a BOTTOM part on the initial image
+	 * then process the local data as usual as neighboors on BOTTOM do exist
+	**/
 	if(coords[1]!= dims[0]-1)
 	{
 		i = height; /* [height] row */
@@ -494,9 +485,9 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	 * parse the whole LEFT column excluding halo points and points submitted by the top 
 	 * and bottom row and filter each pixel
 	**/
-    /* if the LEFT part of the process is not a LEFT part on the initial image
-     * then process the local data as usual as neighboors on LEFT do exist
-    **/
+	/* if the LEFT part of the process is not a LEFT part on the initial image
+	 * then process the local data as usual as neighboors on LEFT do exist
+	**/
 	if(coords[0]!=0)
 	{
 		j = 1; /* first column */
@@ -523,9 +514,9 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	 * parse the whole RIGHT column excluding halo points and points submitted by the top 
 	 * and bottom row and filter each pixel
 	**/
-    /* if the RIGHT part of the process is not a RIGHT part on the initial image
-     * then process the local data as usual as neighboors on RIGHT do exist
-    **/
+	/* if the RIGHT part of the process is not a RIGHT part on the initial image
+	 * then process the local data as usual as neighboors on RIGHT do exist
+	**/
 	if(coords[0] != dims[1] - 1)
 	{
 		j = width; /* [width] column */] 
@@ -547,7 +538,6 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
 		}
 	}
-
 	/*
 	 * !Override! pixel values for corners created by the previous TOP and BOTTOM filters
 	**/
@@ -739,6 +729,5 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		}
 		return 1;
 	}
-
 	return 0;
 }
