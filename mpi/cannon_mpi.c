@@ -1,18 +1,27 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <mpi.h>
+#include "mpi.h"
 
 /* number of processes */
 int numtasks
 /* image-grid dimensions */
-int Nx,Ny,totalSteps;
+int Nx,Ny;
 /* the part of the grid allocate in each process */
 int width,height;
 /* number of processes in each dimension */
 int dims[2];
+/* width and height counters */
+int i,j;
+/* number of iterations */
+int totalSteps; 
+/* redunction frequence in steps */
+int reduceFreq; 
+/* filter array */
+int filter[3][3];
 
-//////////////////////////////////////////////////////////not myRank but rank///
-int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank);
+
+
+int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
 bool imageFilter(struct image* inputImage,struct image* outputImage);
 int pixelFilter(struct image* inputImage,int i, int j);
 
@@ -20,38 +29,61 @@ int pixelFilter(struct image* inputImage,int i, int j);
 int main(int argc, char* argv[]) 
 {
 	/* process rank in MPI_COMM_WORLD communicator */
-	int rank;
+	int myRank;
 	/* process rank in Cartesian communicator */
 	int myGridRank;
 	/* source and destination rank for communication*/
 	int source,dest;
-	int errCode, sendRequestCount,recvRequestCount,i,j;
 	/* tag for messages */
 	int tag = 0;
-	double* data=NULL;
+	/* part of the dataset assigned for the process */
+	double *data = NULL;
+	/* filter calculation results for the process */
+	double *results = NULL;
+	/* determines whether a dimension has cyclic boundaries,
+	 * meaning the 2 edge processes are connected  */
 	int periods[2];
+	/* process coordinates in the cartesian communicator */
 	int coords[2];
+	/* next process coordinates used for communication between neighboor processes*/
 	int nextCoords[2];
-	char buffer[13];
-	/* dayasize for each process */
+	/* datasize for each process */
 	int dataSize;
+	/* a char buffer needed for concatenation, used to determing what image part
+	 * reads each process 
+	**/
+	char buffer[7];
 
+	/* assign the filter values */
+	filter[0][0] = 1;
+	filter[0][1] = 2;
+	filter[0][2] = 1;
+	filter[1][0] = 2;
+	filter[1][1] = 4;
+	filter[1][2] = 2;
+	filter[2][0] = 1;
+	filter[2][1] = 2;
+	filter[2][2] = 1;
 
+	/* cartesian communicator */
 	MPI_Comm comm_cart;
+	/* Error handle for the communicator */
 	MPI_Errhandler errHandler;
-	MPI_Request sendRequestArr[8];
-	MPI_Request recvRequestArr[8];
-
+	/* array of identifiers for non-blocking recv and send */
+	MPI_Request sendRequestArr[8],recvRequestArr[8];
+	/* error coded returned while searching for neighboors */
+	int errCode;
+	/* count how many non-blocking recvs and sends have been submitted */
+	int recvRequestCount = 0;
+	int sendRequestCount = 0;
+	/* array size for create_subarray function */
 	int array_of_sizes[2];
+	/* subarray size to be created from the initial array */
 	int array_of_subsizes[2];
+	/* address of the initial address where subarray cutting starts */
 	int array_of_starts[2];
-
+	/* dimensions of initial array and subarray to be produced */
 	int sub_dims = 2;
-
-
-	/* vertical (x) and horizontal (y) dimensions */
-
-
 	/* dimensions for the cartesian grid */
 	int ndims = 2;
 	/* start MPI */
@@ -59,7 +91,7 @@ int main(int argc, char* argv[])
 	/* get number of processes used */
 	MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
 	/* get process rank in MPI_COMM_WORLD communicator */
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
 
 	/* if uncorrect arguments are passed finalize MPI */
 	if (parseCmdROWArgs(argc, argv, dims, myRank) == 1) {
@@ -110,29 +142,21 @@ int main(int argc, char* argv[])
 	data = calloc(dataSize, sizeof(unsigned char));
 	results = calloc(dataSize, sizeof(unsigned char));
 
-	FILE* inputImage;
+	
 	
 	
 
 	/* find process rank using the cartesian coordinates and assigh the appropiate
-	part of image previously splitted 
-	*/
-	snprintf(buffer, 13, "%d", dims[1]*coords[0]+coords[1]);
+	 * part of image previously splitted 
+	**/
+	FILE* inputImage;
+	snprintf(buffer, 7, "%d", dims[1]*coords[0]+coords[1]);
 	strcat(buffer,".raw");
 	inputImage = fopen(buffer,"rb");
-	
-	
-
-	
-
 
 	fread(data,dataSize,1,inputImage);
 
 	fclose(inputImage);
-
-	
-
-
 
 	/* Create three datatypes by defining sections of the original array
 	 * Our array is treated as a 2 dimensional array and we are slicing 
@@ -372,49 +396,20 @@ int offset(int x,int y)
 	return x*(width+2)+y;
 }
 
-
-
-
-
-
 bool innerImageFilter(unsigned char *data,unsigned char* results)
 {
-	int i,j;
-
-	bool differentPixels = false;
 	for(j = 2; j < height; j++)
 	{
 		for(i = 2; i < width; i++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
-			if( results[offset(i,j)]!= data[offset(i,j)])
-			{
-				differentPixels = true;
-			}
 		}
 	}
-
 	return differentPixels;
 }
 
-
-
 unsigned char innerPixelFilter(unsigned char* data,int i, int j)
 {
-
-	int filter[3][3];
-	
-	filter[0][0] = 1;
-	filter[0][1] = 2;
-	filter[0][2] = 1;
-	filter[1][0] = 2;
-	filter[1][1] = 4;
-	filter[1][2] = 2;
-	filter[2][0] = 1;
-	filter[2][1] = 2;
-	filter[2][2] = 1;
-
-
 	int k,l;
 	int outPixel = 0;
 
@@ -428,147 +423,138 @@ unsigned char innerPixelFilter(unsigned char* data,int i, int j)
 	return (unsigned char)(outPixel/16);
 }
 
-
-
-
-
-
-
+/**
+ * In order to generalize pixel filtering functions we create specific location flags
+ * Location flags ( 0,-1): TOP        |     ( 1,-1):LEFT          | outerPixelFilter
+ *                ( 0, 1): BOTTOM     |     ( 1, 1): RIGHT        |
+ *
+ *                (-1,-1): TOP-LEFT   |     ( 1,-1): BOTTOM-LEFT  | cornerPixelFilter
+ *                (-1, 1): TOP-RIGHT  |     ( 1, 1): BOTTOM-RIGHT |
+**/
 bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 {
-
-
-	int i,j;
-
-	bool differentPixels = false;
-
 	int flag[2];
-
-
-
-//top
-
+	/*  
+	 * parse the whole TOP row excluding halo points and filter each pixel
+	**/
+    /* if the TOP part of the process is not a TOP part on the initial image
+     * then process the local data as usual as neighboors on TOP do exist
+    **/
 	if(coords[1]!=0)
 	{
-
-		i = 1;
-		for(j = 1; j < width+1 ; j++)
-		{
-			results[offset(i,j)] = innerPixelFilter(data,i,j);
-			
-		}
-	
-	}
-
-	else
-	{
-		i = 1;
-		flag[0] = 0;
-		flag[1] = -1;
-
-		for(j = 1; j < width+1 ; j++)
-		{
-			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
-			
-		}
-
-	}
-
-//endTop
-
-//startBottom
-
-
-	if(coords[1]!= dims[0]-1)
-	{
-		i = height;
-
+		i = 1; /* first row */
 		for(j = 1; j < width+1; j++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
-			
+		}
+	}
+	/* if the TOP part of the process is a TOP part on the initial image, pass the information 
+	 * that those pixels belong to the TOP image part, and so TOP neighboors does not exist
+	**/
+	else
+	{
+		i = 1; /* first row */
+		flag[0] = 0;
+		flag[1] = -1;
+		for(j = 1; j < width+1; j++)
+		{
+			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
 		}
 	}
 
-
+	/*  
+	 * parse the whole BOTTOM row excluding halo points and filter each pixel
+	**/
+    /* if the BOTTOM part of the process is not a BOTTOM part on the initial image
+     * then process the local data as usual as neighboors on BOTTOM do exist
+    **/
+	if(coords[1]!= dims[0]-1)
+	{
+		i = height; /* [height] row */
+		for(j = 1; j < width+1; j++)
+		{
+			results[offset(i,j)] = innerPixelFilter(data,i,j);
+		}
+	}
+	/* if the BOTTOM part of the process is a BOOTOM part on the initial image, pass the information 
+	 * that those pixels belong to the BOTTOM image part, and so TOP neighboors does not exist
+	**/
 	else
 	{
-		i = height;
+		i = height; /* [height] row */
 		flag[0] = 0;
 		flag[1] = 1;
-
 		for(j = 1; j < width+1 ; j++)
 		{
 			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
-			
 		}
-
 	}
 
-//endBottom
-
-//startLeft
-
+	/*  
+	 * parse the whole LEFT column excluding halo points and points submitted by the top 
+	 * and bottom row and filter each pixel
+	**/
+    /* if the LEFT part of the process is not a LEFT part on the initial image
+     * then process the local data as usual as neighboors on LEFT do exist
+    **/
 	if(coords[0]!=0)
 	{
-		j = 1;
-
+		j = 1; /* first column */
 		for(i = 2; i < height; i++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
-			
 		}
 	}
+	/* if the LEFT part of the process is a LEFT part on the initial image, pass the information 
+	 * that those pixels belong to the LEFT image part, and so LEFT neighboors does not exist
+	**/
 	else
 	{
-		j = 1;
+		j = 1; /* first column */
 		flag[0] = 1;
-		flag[1] = -1;
-
-		for(j = 1; j < width+1 ; j++)
+		flag[1] = -1
+		for(i = 2; i < height; i++)
 		{
 			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
-			
 		}
-
 	}
 
-//endLeft
-
-
-//startRight
-
+	/*  
+	 * parse the whole RIGHT column excluding halo points and points submitted by the top 
+	 * and bottom row and filter each pixel
+	**/
+    /* if the RIGHT part of the process is not a RIGHT part on the initial image
+     * then process the local data as usual as neighboors on RIGHT do exist
+    **/
 	if(coords[0] != dims[1] - 1)
 	{
-		j = width;
-
+		j = width; /* [width] column */] 
 		for(i = 2; i < height; i++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
-			
 		}
 	}
-
+	/* if the RIGHT part of the process is a RIGHT part on the initial image, pass the information 
+	 * that those pixels belong to the RIGHT image part, and so RIGHT neighboors does not exist
+	**/
 	else
 	{
-		j = width;
+		j = width; /* [width] column */]
 		flag[0] = 1;
 		flag[1] = 1;
-
-		for(j = 1; j < width+1 ; j++)
+		for(i = 2; i < height; i++)
 		{
 			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
-			
 		}
-
 	}
 
-
-
-
-	//endRight
-
-	//begin top Left
+	/*
+	 * !Override! pixel values for corners created by the previous TOP and BOTTOM filters
+	**/
+	/* 
+	 * For the TOP-LEFT process of the image and the top-left pixel (excluding halo point)
+	 * override the result using the corner specific function
+	**/
 	if(coords[1]==0 && coords[0]==0)
 	{
 		flag[0] = -1;
@@ -576,9 +562,10 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 
 		results[offset(1,1)] = cornerPixelFilter(data,1,1,flag);
 	}
-	//end top Left
-
-	//begin top Right
+	/* 
+	 * For the TOP-RIGHT process of the image and the top-right pixel (excluding halo point)
+	 * override the result using the corner specific function
+	**/
 	if(coords[1]==0 && coords[0]==dims[1] -1)
 	{
 		flag[0] = -1;
@@ -586,9 +573,10 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 
 		results[offset(1,width)] = cornerPixelFilter(data,1,width,flag);
 	}
-	//end top Right
-
-	//begin bottom left
+	/* 
+	 * For the BOTTOM-LEFT process of the image and the bottom-left pixel (excluding halo point)
+	 * override the result using the corner specific function
+	**/
 	if(coords[1]==dims[0] -1 && coords[0]==0)
 	{
 		flag[0] = 1;
@@ -596,120 +584,69 @@ bool outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 
 		results[offset(height,1)] = cornerPixelFilter(data,height,1,flag);
 	}
-	//end bottom left
-
-	//begin bottom Right
+	/* 
+	 * For the BOTTOM-right process of the image and the bottom-right pixel (excluding halo point)
+	 * override the result using the corner specific function
+	**/
 	if(coords[1]==dims[0] -1&& coords[0]==dims[1] -1)
 	{
 		flag[0] = 1;
 		flag[1] = 1;
 
 		results[offset(height,width)] = cornerPixelFilter(data,height,width,flag);
-	}77
-	//end bottom Right
-
-
-
-
-
-
+	}
 }
-
-
-
-
-
 
 
 
 unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag)
 {
 
-	int filter[3][3];
-	
-	filter[0][0] = 1;
-	filter[0][1] = 2;
-	filter[0][2] = 1;
-	filter[1][0] = 2;
-	filter[1][1] = 4;
-	filter[1][2] = 2;
-	filter[2][0] = 1;
-	filter[2][1] = 2;
-	filter[2][2] = 1;
-
-
 	int k,l;
 	int outPixel = 0;
 
-		for(k=-1;k<=1;k++)
+	for(k=-1;k<=1;k++)
+	{
+		for(l=-1;l<=1;l++)
 		{
-			for(l=-1;l<=1;l++)
+			if(((flag[0]==0) && (k==flag[1])) || ((flag[0]==1) && (l==flag[1]))   )
 			{
-				if(((flag[0]==0) && (k==flag[1])) || ((flag[0]==1) && (l==flag[1]))   )
-				{
-					outPixel += (data[offset((i),(j))]*filter[k+1][l+1]);	
-				}
-
-				else
-				{
-					outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
-				}
-				
-		0	}
+				outPixel += (data[offset((i),(j))]*filter[k+1][l+1]);	
+			}
+			else
+			{
+				outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
+			}
 		}
-	
-
-
+	}
 	return (unsigned char)(outPixel/16);
 }
 
 unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag)
 {
-
-	int filter[3][3];
-	
-	filter[0][0] = 1;
-	filter[0][1] = 2;
-	filter[0][2] = 1;
-	filter[1][0] = 2;
-	filter[1][1] = 4;
-	filter[1][2] = 2;
-	filter[2][0] = 1;
-	filter[2][1] = 2;
-	filter[2][2] = 1;
-
-
 	int k,l;
 	int outPixel = 0;
 
-		for(k=-1;k<=1;k++)
+	for(k=-1;k<=1;k++)
+	{
+		for(l=-1;l<=1;l++)
 		{
-			for(l=-1;l<=1;l++)
+			if(k==flag[0] && l==flag[1])
 			{
-				if(k==flag[0] && l==flag[1])
-				{
-					outPixel += (data[offset((i),(j))]*filter[k+1][l+1]);	
-				}
-
-				else
-				{
-					outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
-				}
-				
+				outPixel += (data[offset((i),(j))]*filter[k+1][l+1]);	
+			}
+			else
+			{
+				outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
 			}
 		}
-	
-
-
+	}
 	return (unsigned char)(outPixel/16);
 }
 
 
 
-
-
-
-int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank) {
+int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 	if (argv[1] != NULL && strcmp(argv[1], "-nodes") == 0) {
 		if (argv[2] != NULL && argv[3] != NULL) {
 			Nx = atoi(argv[2]);
@@ -718,7 +655,7 @@ int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank) {
 			if (myRank == 0) {
 				printf(
 						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> ]\n\n");
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 			}
 			return 1;
 		}
@@ -726,13 +663,13 @@ int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank) {
 		if (myRank == 0) {
 			printf(
 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 		}
 		return 1;
 	}
 
 	/* allocate processes to each dimension. */
-	if (argv[4] != NULL && strcmp(argv[4], "-procs") == 0) {
+	if (argv[4] != NULL && strcmp(argv[5], "-procs") == 0) {
 		if (argv[5] != NULL && argv[6] != NULL) {
 			dims[0] = (int) atoi(argv[5]);
 			dims[1] = (int) atoi(argv[6]);
@@ -740,7 +677,7 @@ int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank) {
 			if (myRank == 0) {
 				printf(
 						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 			}
 			return 1;
 		}
@@ -748,13 +685,13 @@ int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank) {
 		if (myRank == 0) {
 			printf(
 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 		}
 		return 1;
 	}
 
 	/* Grid of processes size must equal total number of processes */
-	if (dims[0] * dims[1] != numtasks) {
+	if (dims[0] * dims[1] != p) {
 		if (myRank == 0) {
 			printf("\nProcessing grid size must equal total number of processes"
 					" (np = i*j).\n\n");
@@ -770,7 +707,7 @@ int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank) {
 			if (myRank == 0) {
 				printf(
 						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 			}
 			return 1;
 		}
@@ -778,7 +715,27 @@ int parseCmdROWArgs(int argc, char **argv, int *dims, int myRank) {
 		if (myRank == 0) {
 			printf(
 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> ]\n\n");
+							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+		}
+		return 1;
+	}
+
+	if (argv[9] != NULL && strcmp(argv[9], "-reduce") == 0) {
+		if (argv[10] != NULL) {
+			reduceFreq = (int) atoi(argv[10]);
+		} else {
+			if (myRank == 0) {
+				printf(
+						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+			}
+			return 1;
+		}
+	} else {
+		if (myRank == 0) {
+			printf(
+					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+							" [-nodes <Nx> <Ny> <Nz> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
 		}
 		return 1;
 	}
