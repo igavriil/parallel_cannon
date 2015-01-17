@@ -423,9 +423,9 @@ int breakf()
 
 int innerImageFilter(unsigned char *data,unsigned char* results)
 {
-	for(i = 2; i < height; i++)
+	for(j = 2; j< height; j++)
 	{
-		for(j = 2; j < width; j++)
+		for(i = 2; i < width; i++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
 		}
