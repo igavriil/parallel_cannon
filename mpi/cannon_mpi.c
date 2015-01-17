@@ -30,6 +30,7 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords);
 unsigned char innerPixelFilter(unsigned char* data,int i, int j);
 unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag);
 unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag);
+int breakf();
 
 int main(int argc, char* argv[]) 
 {
@@ -142,6 +143,7 @@ int main(int argc, char* argv[])
 	 * Padding needed for the algorithm is one pixel at each outter pixel
 	**/
 	dataSize = (width+2)*(height+2);
+	printf("width %d, height %d\n\n",width+2,height+2);
 	/* Allocate empty space for data to be read and output data calculated 
 	 * from the filtering algorithm. Data are stored as 1D array in the 
 	 * memory
@@ -165,6 +167,8 @@ int main(int argc, char* argv[])
 
 	fclose(inputImage);
 
+	printf( "process %d : i have 1st pixel %d and second %d\n",myRank, data[offset(0,0)], data[offset(1,1)] );
+
 	/* Create three datatypes by defining sections of the original array
 	 * Our array is treated as a 2 dimensional array and we are slicing 
 	 * rows, columns and points having as starting position the initial position (0,0)
@@ -180,6 +184,8 @@ int main(int argc, char* argv[])
 	**/
 	array_of_starts[0] = 0;
 	array_of_starts[1] = 0;
+
+	breakf();
 
 	/* slicing a COLUMN from the 2 dimensional array */
 	MPI_Datatype COLUMN;
@@ -240,6 +246,7 @@ int main(int argc, char* argv[])
 		MPI_Recv_init(&data[offset(1,0)], 1, COLUMN, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
+		printf("left-----%d,%d-----%d,%d...\n",coords[0],coords[1],nextCoords[0],nextCoords[1]);		
 	}
 
 	/* Right Neighboor - process (x-1,y) in the Cartesian! topology */
@@ -256,22 +263,7 @@ int main(int argc, char* argv[])
 		MPI_Recv_init(&data[offset(1,width+1)], 1, COLUMN, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
-	}
-
-	/* Top Neighboor - process (x,y-1) in the Cartesian! topology */
-	nextCoords[0] = coords[0];
-	nextCoords[1] = coords[1] - 1;
-	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
-	if (errCode == MPI_SUCCESS) {
-		/* take the row starting at ([1]-row,[1]-column) address and send */
-		MPI_Send_init(&data[offset(1,1)], 1, ROW, dest, tag,
-				comm_cart, &sendRequestArr[sendRequestCount]);
-		sendRequestCount++;
-		source = dest;
-		/* set starting position at ([0]-row,[1]-column) and place the received row */
-		MPI_Recv_init(&data[offset(0,1)], 1, ROW, source, tag,
-				comm_cart, &recvRequestArr[recvRequestCount]);
-		recvRequestCount++;
+		printf("right-----%d,%d-----%d,%d...\n",coords[0],coords[1],nextCoords[0],nextCoords[1]);		
 	}
 
 	/* Bottom Neighboor - process (x,y+1) in the Cartesian! topology */
@@ -288,13 +280,31 @@ int main(int argc, char* argv[])
 		MPI_Recv_init(&data[offset(height+1,1)], 1, ROW, source, tag,
 				comm_cart, &recvRequestArr[recvRequestCount]);
 		recvRequestCount++;
+		printf("bottom-----%d,%d-----%d,%d...\n",coords[0],coords[1],nextCoords[0],nextCoords[1]);			
+	}
+
+	/* Top Neighboor - process (x,y-1) in the Cartesian! topology */
+	nextCoords[0] = coords[0];
+	nextCoords[1] = coords[1] - 1;
+	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
+	if (errCode == MPI_SUCCESS) {
+		/* take the row starting at ([1]-row,[1]-column) address and send */
+		MPI_Send_init(&data[offset(1,1)], 1, ROW, dest, tag,
+				comm_cart, &sendRequestArr[sendRequestCount]);
+		sendRequestCount++;
+		source = dest;
+		/* set starting position at ([0]-row,[1]-column) and place the received row */
+		MPI_Recv_init(&data[offset(0,1)], 1, ROW, source, tag,
+				comm_cart, &recvRequestArr[recvRequestCount]);
+		recvRequestCount++;
+		printf("top-----%d,%d-----%d,%d...\n",coords[0],coords[1],nextCoords[0],nextCoords[1]);		
 	}
 
 	/* Bottom-Right Neighboor - process (x+1,y+1) in the Cartesian! topology */
 	nextCoords[0] = coords[0] + 1;
 	nextCoords[1] = coords[1] + 1;
 	errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
-	if (errCode == MPI_SUCCESS) {
+	if (errCode == MPI_SUCCESS && 1) {
 		/* take the point starting at ([height]-row,[width]-column) address and send */
 		MPI_Send_init(&data[offset(height,width)], 1, POINT, dest, tag,
 				comm_cart, &sendRequestArr[sendRequestCount]);
@@ -356,26 +366,29 @@ int main(int argc, char* argv[])
 
 	while (steps < totalSteps)
 	{
+		
 		steps++;
 		
 		MPI_Startall(sendRequestCount,sendRequestArr);
 		MPI_Startall(recvRequestCount,recvRequestArr);
 
 		/* calculate filter for inner data - no need for communication */
-		innerImageFilter(data,results);
-
-		printf( "Hello world from process %d i have the string compete inner calc\n", myRank);
+		printf( "Hello world from process (%d,%d) i entered the void\n", coords[0],coords[1]);
+		//innerImageFilter(data,results);
+		printf("\n\n");
+		printf( "Hello world from process (%d,%d) i have completed inner calc\n", coords[0],coords[1]);
 
 		/* before continuing to compute outer image make sure all messages 
 		 * are received
 		**/
+
 		MPI_Waitall(recvRequestCount,recvRequestArr,MPI_STATUSES_IGNORE);
 
 		/* calculate filter for outer with the halo points received 
 		 * process coordinates are given in order to detect what part of the image
 		 * the process holds
 		**/
-		outerImageFilter(data,results,coords);
+		//outerImageFilter(data,results,coords);
 
 		/* ensure all data have been sent successfully sent
 		 * before the next loop iteration */
@@ -392,6 +405,10 @@ int main(int argc, char* argv[])
 int offset(int x,int y)
 {
 	return x*(width+2)+y;
+}
+int breakf()
+{
+	printf("break\n");
 }
 
 int innerImageFilter(unsigned char *data,unsigned char* results)
@@ -646,98 +663,109 @@ unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag)
 
 
 int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
-	if (argv[1] != NULL && strcmp(argv[1], "-nodes") == 0) {
-		if (argv[2] != NULL && argv[3] != NULL) {
-			Nx = atoi(argv[2]);
-			Ny = atoi(argv[3]);
-		} else {
-			if (myRank == 0) {
-				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
-			}
-			return 1;
-		}
-	} else {
-		if (myRank == 0) {
-			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
-		}
-		return 1;
-	}
+	Nx = 1920;
+	Ny = 2520;
+	dims[0]=1;
+	dims[1]=2;
+	totalSteps = 4;
+	reduceFreq = 10;
 
-	/* allocate processes to each dimension. */
-	if (argv[4] != NULL && strcmp(argv[4], "-procs") == 0) {
-		if (argv[5] != NULL && argv[6] != NULL) {
-			dims[0] = (int) atoi(argv[5]);
-			dims[1] = (int) atoi(argv[6]);
-		} else {
-			if (myRank == 0) {
-				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
-			}
-			return 1;
-		}
-	} else {
-		if (myRank == 0) {
-			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
-		}
-		return 1;
-	}
 
-	/* Grid of processes size must equal total number of processes */
-	if (dims[0] * dims[1] != numtasks) {
-		if (myRank == 0) {
-			printf("\nProcessing grid size must equal total number of processes"
-					" (np = i*j).\n\n");
-		}
-		return 1;
-	}
-
-	/* specify number of iterations */
-	if (argv[7] != NULL && strcmp(argv[7], "-steps") == 0) {
-		if (argv[8] != NULL) {
-			totalSteps = atoi(argv[8]);
-		} else {
-			if (myRank == 0) {
-				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
-			}
-			return 1;
-		}
-	} else {
-		if (myRank == 0) {
-			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
-		}
-		return 1;
-	}
-
-	if (argv[9] != NULL && strcmp(argv[9], "-reduce") == 0) {
-		if (argv[10] != NULL) {
-			reduceFreq = (int) atoi(argv[10]);
-		} else {
-			if (myRank == 0) {
-				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
-			}
-			return 1;
-		}
-	} else {
-		if (myRank == 0) {
-			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
-		}
-		return 1;
-	}
-	
 	return 0;
+	
+	// if (argv[1] != NULL && strcmp(argv[1], "-nodes") == 0) {
+	// 	if (argv[2] != NULL && argv[3] != NULL) {
+	// 		Nx = atoi(argv[2]);
+	// 		Ny = atoi(argv[3]);
+	// 	} else {
+	// 		if (myRank == 0) {
+	// 			printf(
+	// 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+	// 							" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+	// 		}
+	// 		return 1;
+	// 	}
+	// } else {
+	// 	if (myRank == 0) {
+	// 		printf(
+	// 				"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+	// 						" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+	// 	}
+	// 	return 1;
+	// }
+
+	// /* allocate processes to each dimension. */
+	// if (argv[4] != NULL && strcmp(argv[4], "-procs") == 0) {
+	// 	if (argv[5] != NULL && argv[6] != NULL) {
+	// 		dims[0] = (int) atoi(argv[5]);
+	// 		dims[1] = (int) atoi(argv[6]);
+	// 	} else {
+	// 		if (myRank == 0) {
+	// 			printf(
+	// 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+	// 							" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+	// 		}
+	// 		return 1;
+	// 	}
+	// } else {
+	// 	if (myRank == 0) {
+	// 		printf(
+	// 				"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+	// 						" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+	// 	}
+	// 	return 1;
+	// }
+
+	// /* Grid of processes size must equal total number of processes */
+	// if (dims[0] * dims[1] != numtasks) {
+	// 	if (myRank == 0) {
+	// 		printf("\nProcessing grid size must equal total number of processes"
+	// 				" (np = i*j).\n\n");
+	// 	}
+	// 	return 1;
+	// }
+
+	// /* specify number of iterations */
+	// if (argv[7] != NULL && strcmp(argv[7], "-steps") == 0) {
+	// 	if (argv[8] != NULL) {
+	// 		totalSteps = atoi(argv[8]);
+	// 	} else {
+	// 		if (myRank == 0) {
+	// 			printf(
+	// 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+	// 							" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+	// 		}
+	// 		return 1;
+	// 	}
+	// } else {
+	// 	if (myRank == 0) {
+	// 		printf(
+	// 				"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+	// 						" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+	// 	}
+	// 	return 1;
+	// }
+
+	// if (argv[9] != NULL && strcmp(argv[9], "-reduce") == 0) {
+	// 	if (argv[10] != NULL) {
+	// 		reduceFreq = (int) atoi(argv[10]);
+	// 	} else {
+	// 		if (myRank == 0) {
+	// 			printf(
+	// 					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+	// 							" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+	// 		}
+	// 		return 1;
+	// 	}
+	// } else {
+	// 	if (myRank == 0) {
+	// 		printf(
+	// 				"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
+	// 						" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+	// 	}
+	// 	return 1;
+	// }
+	
+	// return 0;
+	
 }
