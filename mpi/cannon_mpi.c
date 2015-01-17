@@ -30,6 +30,7 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords);
 unsigned char innerPixelFilter(unsigned char* data,int i, int j);
 unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag);
 unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag);
+void swapImage(unsigned char** data,unsigned char** results);
 int breakf();
 
 int main(int argc, char* argv[]) 
@@ -60,7 +61,7 @@ int main(int argc, char* argv[])
 	/* a char buffer needed for concatenation, used to determing what image part
 	 * reads each process 
 	**/
-	char buffer[7];
+	char buffer[9];
 
 	/* assign the filter values */
 	filter[0][0] = 1;
@@ -119,6 +120,7 @@ int main(int argc, char* argv[])
 		printf("\nProblem grid: %dx%d.\n", Nx, Ny);
 		printf("P = %d processes.\n", numtasks);
 		printf("Sub-grid / process: %dx%d.\n", width, height);
+		printf("Sub-grid datasize: %d\n",(width+2)*(height+2));
 		printf("\nC = %d iterations.\n", totalSteps);
 		printf("Reduction performed every %d iteration(s).\n", reduceFreq);
 	}
@@ -155,7 +157,7 @@ int main(int argc, char* argv[])
 	 * part of image previously splitted 
 	**/
 	FILE* inputImage;
-	snprintf(buffer, 7, "%d", dims[1]*coords[0]+coords[1]);
+	snprintf(buffer, 9, "%d", dims[1]*coords[0]+coords[1]);
 	strcat(buffer,".raw");
 
 	inputImage = fopen(buffer,"rb");
@@ -379,11 +381,23 @@ int main(int argc, char* argv[])
 		/* ensure all data have been sent successfully sent
 		 * before the next loop iteration */
 		MPI_Waitall(sendRequestCount,sendRequestArr,MPI_STATUSES_IGNORE);
+		swapImage(&data,&results);
 	}
+	
+
+	
+	FILE *outputImage;
+
+	strcat(buffer,"_o");
+
+	outputImage = fopen( buffer, "w" );
+	fwrite(results , 1 , dataSize , outputImage);
+
+	fclose(outputImage);
+	
 	MPI_Finalize();
 
 	return 0;
-
 }
 
 
@@ -395,6 +409,13 @@ int offset(int x,int y)
 {
 	return x*(width+2)+y;
 }
+
+void swapImage(unsigned char** data,unsigned char** results)
+{
+	unsigned char* temp = *data;
+	*data = *results;
+	*results = temp;
+}
 int breakf()
 {
 	printf("break\n");
@@ -402,9 +423,9 @@ int breakf()
 
 int innerImageFilter(unsigned char *data,unsigned char* results)
 {
-	for(j = 2; j < height; j++)
+	for(i = 2; i < height; i++)
 	{
-		for(i = 2; i < width; i++)
+		for(j = 2; j < width; j++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
 		}
@@ -606,7 +627,6 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 
 unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag)
 {
-
 	int k,l;
 	int outPixel = 0;
 

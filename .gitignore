@@ -2,5 +2,6 @@ waterfall_grey_1920_2520.txt
 waterfall_grey_1920_2520.raw
 waterfall_1920_2520.raw
 *.raw
+*.raw_o
 test_out.txt
 out.*
