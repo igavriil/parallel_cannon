@@ -358,10 +358,7 @@ int main(int argc, char* argv[])
 
 	while (steps < totalSteps)
 	{
-		if(myRank == 2)
-		{
-			printf("rank 2 before communication first pixel :%d , second pixel :%d \n" ,data[offset(1,0)],data[offset(1,1)]);
-		}
+	
 		if(myRank == 0)
 		{
 			printf("rank 0 before communication first pixel :%d , second pixel :%d \n" ,data[offset(1,width)],data[offset(1,width+1)]);
@@ -387,12 +384,7 @@ int main(int argc, char* argv[])
 		**/
 		outerImageFilter(data,results,coords);
 
-		if(myRank == 2)
-		{
-			printf("rank 2 after communication first pixel :%d , second pixel :%d\n",data[offset(1,0)],data[offset(1,1)]);
-			printf("rank 2 results after communication first pixel :%d , second pixel :%d\n",results[offset(1,0)],results[offset(1,1)]);
-
-		}
+		
 		if(myRank == 0)
 		{
 			printf("rank 0 after communication first pixel :%d , second pixel :%d \n" ,data[offset(1,width)],data[offset(1,width+1)]);
