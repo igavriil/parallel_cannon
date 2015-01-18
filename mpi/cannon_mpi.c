@@ -23,6 +23,7 @@ int filter[3][3];
 
 
 
+
 int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
 int offset(int i,int j);
 int innerImageFilter(unsigned char *data,unsigned char* results);
@@ -30,7 +31,7 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords);
 unsigned char innerPixelFilter(unsigned char* data,int i, int j);
 unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag);
 unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag);
-void swapImage(unsigned char** data,unsigned char** results);
+void swapImage(unsigned char* data,unsigned char* results);
 int breakf();
 
 int main(int argc, char* argv[]) 
@@ -63,6 +64,9 @@ int main(int argc, char* argv[])
 	**/
 	char buffer[9];
 
+	int sf;
+	int rf;
+
 	/* assign the filter values */
 	filter[0][0] = 1;
 	filter[0][1] = 2;
@@ -80,6 +84,8 @@ int main(int argc, char* argv[])
 	MPI_Errhandler errHandler;
 	/* array of identifiers for non-blocking recv and send */
 	MPI_Request sendRequestArr[8],recvRequestArr[8];
+
+	MPI_Status sendRequestStatus[8],recvRequestStatus[8];
 	/* error coded returned while searching for neighboors */
 	int errCode;
 	/* count how many non-blocking recvs and sends have been submitted */
@@ -227,6 +233,8 @@ int main(int argc, char* argv[])
 	 * operation for each neighbor found 
 	**/
 
+
+
 	/* Left Neighboor - process (x-1,y) in the Cartesian! topology */
 	nextCoords[0] = coords[0] - 1;
 	nextCoords[1] = coords[1];
@@ -358,24 +366,22 @@ int main(int argc, char* argv[])
 
 	while (steps < totalSteps)
 	{
-	
-		if(myRank == 0)
-		{
-			printf("rank 0 before communication first pixel :%d , second pixel :%d \n" ,data[offset(1,width)],data[offset(1,width+1)]);
-		}
 		steps++;		
 		MPI_Startall(sendRequestCount,sendRequestArr);
 		MPI_Startall(recvRequestCount,recvRequestArr);
 		
-
+		
 		/* calculate filter for inner data - no need for communication */
 		innerImageFilter(data,results);
+		
 
 		/* before continuing to compute outer image make sure all messages 
 		 * are received
 		**/
-
+		
 		MPI_Waitall(recvRequestCount,recvRequestArr,MPI_STATUSES_IGNORE);
+		MPI_Testall(recvRequestCount, recvRequestArr,&rf, recvRequestStatus);
+		printf("%d\n",rf);
 		
 
 		/* calculate filter for outer with the halo points received 
@@ -384,20 +390,17 @@ int main(int argc, char* argv[])
 		**/
 		outerImageFilter(data,results,coords);
 
-		
-		if(myRank == 0)
-		{
-			printf("rank 0 after communication first pixel :%d , second pixel :%d \n" ,data[offset(1,width)],data[offset(1,width+1)]);
-			printf("rank 0 results after communication first pixel :%d , second pixel :%d \n" ,results[offset(1,width)],results[offset(1,width+1)]);
 
-		}
 
 		/* ensure all data have been sent successfully sent
 		 * before the next loop iteration */
+		
 		MPI_Waitall(sendRequestCount,sendRequestArr,MPI_STATUSES_IGNORE);
-		swapImage(&data,&results);
+		MPI_Testall(sendRequestCount, sendRequestArr,&sf, recvRequestStatus);
+		printf("%d\n",sf);
 
-		printf("\n\n");
+		swapImage(data,results);
+
 	}
 	
 
@@ -407,7 +410,9 @@ int main(int argc, char* argv[])
 	strcat(buffer,"_o");
 
 	outputImage = fopen( buffer, "w" );
-	fwrite(results , 1 , dataSize , outputImage);
+	fwrite(data , 1 , dataSize , outputImage);
+	//fwrite(data , 1 , dataSize , outputImage);
+
 
 	fclose(outputImage);
 	
@@ -426,11 +431,19 @@ int offset(int i,int j)
 	return i*(width+2)+j;
 }
 
-void swapImage(unsigned char** data,unsigned char** results)
+void swapImage(unsigned char* data,unsigned char* results)
 {
-	unsigned char* temp = *data;
+
+	for(i=0;i<height+2;i++)
+	{
+		for(j=0;j<width+2;j++)
+		{
+			data[offset(i,j)] = results[offset(i,j)];
+		}
+	}
+	/*unsigned char* temp = *data;
 	*data = *results;
-	*results = temp;
+	*results = temp;*/
 }
 int breakf()
 {
@@ -458,7 +471,7 @@ unsigned char innerPixelFilter(unsigned char* data,int i, int j)
 	{
 		for(l=-1;l<=1;l++)
 		{
-				outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
+				outPixel += (data[offset((i+k),(j+l))]*filter[k+1][l+1]);
 		}
 	}
 	return (unsigned char)(outPixel/16);
@@ -515,6 +528,7 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 		for(j = 1; j < width+1; j++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
+
 		}
 	}
 	/* if the BOTTOM part of the process is a BOOTOM part on the initial image, pass the information 
@@ -544,6 +558,7 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 		for(i = 2; i < height; i++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
+
 		}
 	}
 	/* if the LEFT part of the process is a LEFT part on the initial image, pass the information 
@@ -567,12 +582,13 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	/* if the RIGHT part of the process is not a RIGHT part on the initial image
 	 * then process the local data as usual as neighboors on RIGHT do exist
 	**/
-	if(coords[0] != dims[1] - 1)
+	if(coords[0] != dims[1] - 1) 	
 	{
 		j = width; /* [width] column */
 		for(i = 2; i < height; i++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
+
 		}
 	}
 	/* if the RIGHT part of the process is a RIGHT part on the initial image, pass the information 
@@ -606,6 +622,7 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	 * For the TOP-RIGHT process of the image and the top-right pixel (excluding halo point)
 	 * override the result using the corner specific function
 	**/
+	
 	if(coords[1]==0 && coords[0]==dims[1] -1)
 	{
 		flag[0] = -1;
@@ -652,11 +669,11 @@ unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag)
 		{
 			if( ((flag[0]==0) && (k==flag[1])) || ((flag[0]==1) && (l==flag[1]))   )
 			{
-				outPixel += (data[offset((i),(j))]*filter[k+1][l+1]);	
+				outPixel += (data[offset(i,j)]*filter[k+1][l+1]);	
 			}
 			else
 			{
-				outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
+				outPixel += (data[offset((i+k),(j+l))]*filter[k+1][l+1]);
 			}
 		}
 	}
@@ -678,7 +695,7 @@ unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag)
 			}
 			else
 			{
-				outPixel += (data[offset((i-k),(j-l))]*filter[k+1][l+1]);
+				outPixel += (data[offset((i+k),(j+l))]*filter[k+1][l+1]);
 			}
 		}
 	}
