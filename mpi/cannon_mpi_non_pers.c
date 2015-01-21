@@ -403,21 +403,32 @@ int main(int argc, char* argv[])
 	MPI_File output;
 
 	MPI_Datatype OUTARRAY;
-    array_of_sizes[0] = Ny;
-    array_of_sizes[1] = Nx;
- 	array_of_starts[0] = coords[1]*(height-2);
-    array_of_starts[1] = coords[0]*(width-2);
-    array_of_subsizes[0] = height+2;
-    array_of_subsizes[1] = width+2;
+    array_of_sizes[0] = height+2;
+    array_of_sizes[1] = width+2;
+ 	array_of_starts[0] = 1;
+    array_of_starts[1] = 1;
+    array_of_subsizes[0] = height;
+    array_of_subsizes[1] = width;
     MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &OUTARRAY);
     MPI_Type_commit(&OUTARRAY);
 
 
-	MPI_File_open(comm_cart,"../outgrey.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
-	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,ARRAY,"native",MPI_INFO_NULL);
-    MPI_File_write_all(output, &results[offset(0,0)],dataSize,MPI_UNSIGNED_CHAR,&fileStatus);
+    MPI_Datatype FILETYPE;
+    array_of_sizes[0] = Ny;
+    array_of_sizes[1] = Nx;
+    array_of_starts[0] = coords[1]*(height);
+    array_of_starts[1] = coords[0]*(width);
+    array_of_subsizes[0] = height;
+    array_of_subsizes[1] = width;
+    MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &FILETYPE);
+    MPI_Type_commit(&FILETYPE);
 
-    MPI_File_close(&output);
+
+	MPI_File_open(comm_cart,"../outgrey.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
+	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
+    MPI_File_write_all(output, results,1,OUTARRAY,&fileStatus);
+
+    MPI_File_close(&output);  
 
 
     FILE *outputImage;
