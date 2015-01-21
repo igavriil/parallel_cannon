@@ -177,8 +177,9 @@ int main(int argc, char* argv[])
 
 
 	MPI_File_open(comm_cart,"../waterfall_grey_1920_2520.raw",MPI_MODE_RDWR,MPI_INFO_NULL,&image);
-
-	MPI_File_set_view(image,0,MPI_UNSIGNED_CHAR,ARRAY,"native",MPI_INFO_NULL);
+	dataSize = (width)*(height);
+	fileOffset = 0;
+	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,ARRAY,"native",MPI_INFO_NULL);
     MPI_File_read_all(image, &data[offset(1,1)],dataSize,MPI_UNSIGNED_CHAR,&fileStatus);
 
     MPI_File_close(&image);
@@ -416,7 +417,7 @@ int main(int argc, char* argv[])
 	MPI_File_open(comm_cart,"../outgrey.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
 	dataSize = width*height;
 	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,ARRAY,"native",MPI_INFO_NULL);
-    MPI_File_write_all(output, &data[offset(1,1)],dataSize,MPI_UNSIGNED_CHAR,&fileStatus);
+    MPI_File_write_all(output, &results[offset(1,1)],dataSize,MPI_UNSIGNED_CHAR,&fileStatus);
 
     MPI_File_close(&output);
     
