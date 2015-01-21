@@ -168,16 +168,15 @@ int main(int argc, char* argv[])
 	MPI_Datatype ARRAY;
     array_of_sizes[0] = Ny;
     array_of_sizes[1] = Nx;
-    array_of_starts[0] = coords[1]*(height);
-    array_of_starts[1] = coords[0]*(width);
-    array_of_subsizes[0] = height;
-    array_of_subsizes[1] = width;
+    array_of_starts[0] = coords[1]*(height-2);
+    array_of_starts[1] = coords[0]*(width-2);
+    array_of_subsizes[0] = height+2;
+    array_of_subsizes[1] = width+2;
     MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &ARRAY);
     MPI_Type_commit(&ARRAY);
 
 
 	MPI_File_open(comm_cart,"../waterfall_grey_1920_2520.raw",MPI_MODE_RDWR,MPI_INFO_NULL,&image);
-	dataSize = (width)*(height);
 	fileOffset = 0;
 	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,ARRAY,"native",MPI_INFO_NULL);
     MPI_File_read_all(image, &data[offset(1,1)],dataSize,MPI_UNSIGNED_CHAR,&fileStatus);
@@ -406,20 +405,33 @@ int main(int argc, char* argv[])
 	MPI_Datatype OUTARRAY;
     array_of_sizes[0] = Ny;
     array_of_sizes[1] = Nx;
-    array_of_starts[0] = coords[1]*(height);
-    array_of_starts[1] = coords[0]*(width);
-    array_of_subsizes[0] = height;
-    array_of_subsizes[1] = width;
+ 	array_of_starts[0] = coords[1]*(height-2);
+    array_of_starts[1] = coords[0]*(width-2);
+    array_of_subsizes[0] = height+2;
+    array_of_subsizes[1] = width+2;
     MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &OUTARRAY);
     MPI_Type_commit(&OUTARRAY);
 
 
 	MPI_File_open(comm_cart,"../outgrey.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
-	dataSize = width*height;
 	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,ARRAY,"native",MPI_INFO_NULL);
-    MPI_File_write_all(output, &results[offset(1,1)],dataSize,MPI_UNSIGNED_CHAR,&fileStatus);
+    MPI_File_write_all(output, &results[offset(0,0)],dataSize,MPI_UNSIGNED_CHAR,&fileStatus);
 
     MPI_File_close(&output);
+
+
+    FILE *outputImage;
+
+	snprintf(buffer, 9, "%d", dims[1]*coords[0]+coords[1]);
+	strcat(buffer,".raw");
+	strcat(buffer,"_o");
+	dataSize = (width+2)*(height+2);
+	outputImage = fopen( buffer, "w" );
+	fwrite(data , 1 , dataSize , outputImage);
+	//fwrite(data , 1 , dataSize , outputImage);
+
+
+	fclose(outputImage);
     
 
 

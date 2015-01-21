@@ -415,6 +415,21 @@ int main(int argc, char* argv[])
 
 
 	fclose(outputImage);
+
+
+
+	FILE *output;
+
+	snprintf(buffer, 9, "%d", dims[1]*coords[0]+coords[1]);
+	strcat(buffer,".raw");
+	strcat(buffer,"_o");
+
+	output = fopen( buffer, "w" );
+	fwrite(data , 1 , dataSize , output);
+	//fwrite(data , 1 , dataSize , outputImage);
+
+
+	fclose(output);
 	
 	MPI_Finalize();
 
