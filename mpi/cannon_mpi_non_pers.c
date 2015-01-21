@@ -430,25 +430,7 @@ int main(int argc, char* argv[])
 
     MPI_File_close(&output);  
 
-
-    FILE *outputImage;
-
-	snprintf(buffer, 9, "%d", dims[1]*coords[0]+coords[1]);
-	strcat(buffer,".raw");
-	strcat(buffer,"_o");
-	dataSize = (width+2)*(height+2);
-	outputImage = fopen( buffer, "w" );
-	fwrite(data , 1 , dataSize , outputImage);
-	//fwrite(data , 1 , dataSize , outputImage);
-
-
-	fclose(outputImage);
-    
-
-
-
-	
-	MPI_Finalize();
+   	MPI_Finalize();
 
 	return 0;
 }
