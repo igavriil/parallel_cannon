@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include <mpi.h>
+#include <omp.h>
 
 /* number of processes */
 int numtasks;
@@ -59,6 +60,8 @@ int main(int argc, char* argv[])
 	int dataSize;
 	/* computation steps */
 	int steps = 0; 
+
+	double t1,t2,Dt_local,Dt_total;
 
 	int sf;
 	int rf;
@@ -166,20 +169,32 @@ int main(int argc, char* argv[])
 	MPI_File image;
 
 	MPI_Datatype ARRAY;
-    array_of_sizes[0] = Ny;
-    array_of_sizes[1] = Nx;
-    array_of_starts[0] = coords[1]*(height-2);
-    array_of_starts[1] = coords[0]*(width-2);
-    array_of_subsizes[0] = height+2;
-    array_of_subsizes[1] = width+2;
+    array_of_sizes[0] = height+2;
+    array_of_sizes[1] = width+2;
+ 	array_of_starts[0] = 1;
+    array_of_starts[1] = 1;
+    array_of_subsizes[0] = height;
+    array_of_subsizes[1] = width;
     MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &ARRAY);
     MPI_Type_commit(&ARRAY);
 
 
+    MPI_Datatype FILETYPE;
+    array_of_sizes[0] = Ny;
+    array_of_sizes[1] = Nx;
+    array_of_starts[0] = coords[1]*(height);
+    array_of_starts[1] = coords[0]*(width);
+    array_of_subsizes[0] = height;
+    array_of_subsizes[1] = width;
+    MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &FILETYPE);
+    MPI_Type_commit(&FILETYPE);
+
+
+
 	MPI_File_open(comm_cart,"../waterfall_grey_1920_2520.raw",MPI_MODE_RDWR,MPI_INFO_NULL,&image);
 	fileOffset = 0;
-	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,ARRAY,"native",MPI_INFO_NULL);
-    MPI_File_read_all(image, &data[offset(1,1)],dataSize,MPI_UNSIGNED_CHAR,&fileStatus);
+	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
+    MPI_File_read_all(image, data,1,ARRAY,&fileStatus);
 
     MPI_File_close(&image);
 
@@ -242,6 +257,7 @@ int main(int argc, char* argv[])
 		MPI_Errhandler_set(comm_cart, MPI_ERRORS_RETURN);
 	}
 
+	t1 = MPI_Wtime();
 
 	while (steps < totalSteps)
 	{
@@ -375,8 +391,8 @@ int main(int argc, char* argv[])
 		**/
 		
 		MPI_Waitall(recvRequestCount,recvRequestArr,MPI_STATUSES_IGNORE);
-		MPI_Testall(recvRequestCount, recvRequestArr,&rf, recvRequestStatus);
-		printf("%d\n",rf);
+		//MPI_Testall(recvRequestCount, recvRequestArr,&rf, recvRequestStatus);
+		//printf("%d\n",rf);
 		
 
 		/* calculate filter for outer with the halo points received 
@@ -391,46 +407,42 @@ int main(int argc, char* argv[])
 		 * before the next loop iteration */
 		
 		MPI_Waitall(sendRequestCount,sendRequestArr,MPI_STATUSES_IGNORE);
-		MPI_Testall(sendRequestCount, sendRequestArr,&sf, recvRequestStatus);
-		printf("%d\n",sf);
+		//MPI_Testall(sendRequestCount, sendRequestArr,&sf, recvRequestStatus);
+		//printf("%d\n",sf);
 
 		swapImage(&data,&results);
 
 	}
 	
+	t2 = MPI_Wtime();
+
+    Dt_local = t2 - t1;
+	MPI_Reduce(&Dt_local, &Dt_total, 1, MPI_DOUBLE, MPI_MAX, 0, comm_cart);	
 	
-	
+/* Elapsed times for the slowest process */
+	if (myRank == 0) {
+		
+		printf("Max. Total time: Dt = %.3f msec.\n\n", Dt_total * 1000);
+	}
+
+
+
 	MPI_File output;
 
-	MPI_Datatype OUTARRAY;
-    array_of_sizes[0] = height+2;
-    array_of_sizes[1] = width+2;
- 	array_of_starts[0] = 1;
-    array_of_starts[1] = 1;
-    array_of_subsizes[0] = height;
-    array_of_subsizes[1] = width;
-    MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &OUTARRAY);
-    MPI_Type_commit(&OUTARRAY);
 
 
-    MPI_Datatype FILETYPE;
-    array_of_sizes[0] = Ny;
-    array_of_sizes[1] = Nx;
-    array_of_starts[0] = coords[1]*(height);
-    array_of_starts[1] = coords[0]*(width);
-    array_of_subsizes[0] = height;
-    array_of_subsizes[1] = width;
-    MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &FILETYPE);
-    MPI_Type_commit(&FILETYPE);
 
 
 	MPI_File_open(comm_cart,"../outgrey.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
 	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
-    MPI_File_write_all(output, results,1,OUTARRAY,&fileStatus);
+    MPI_File_write_all(output, data,1,ARRAY,&fileStatus);
 
     MPI_File_close(&output);  
 
+
+
    	MPI_Finalize();
+
 
 	return 0;
 }
@@ -466,8 +478,13 @@ int breakf()
 
 int innerImageFilter(unsigned char *data,unsigned char* results)
 {
+
+
+
+#pragma omp parallel for collapse(2)
 	for(i = 2; i < height; i++)
 	{
+
 		for(j = 2; j < width; j++)
 		{
 			results[offset(i,j)] = innerPixelFilter(data,i,j);
