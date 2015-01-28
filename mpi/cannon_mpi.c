@@ -62,7 +62,8 @@ int main(int argc, char* argv[])
 	/* a char buffer needed for concatenation, used to determing what image part
 	 * reads each process 
 	**/
-	char buffer[9];
+
+	double t1,t2,Dt_local,Dt_total;
 
 	int sf;
 	int rf;
@@ -84,8 +85,12 @@ int main(int argc, char* argv[])
 	MPI_Errhandler errHandler;
 	/* array of identifiers for non-blocking recv and send */
 	MPI_Request sendRequestArr[8],recvRequestArr[8];
-
 	MPI_Status sendRequestStatus[8],recvRequestStatus[8];
+	/* offset for seeking into the file */
+    MPI_Offset fileOffset;
+    /* Statuses for reading file and Requests send/received */
+    MPI_Status fileStatus;
+
 	/* error coded returned while searching for neighboors */
 	int errCode;
 	/* count how many non-blocking recvs and sends have been submitted */
@@ -160,17 +165,39 @@ int main(int argc, char* argv[])
 
 	
 	/* find process rank using the cartesian coordinates and assigh the appropiate
-	 * part of image previously splitted 
+	 * part of image
 	**/
-	FILE* inputImage;
-	snprintf(buffer, 9, "%d", dims[1]*coords[0]+coords[1]);
-	strcat(buffer,".raw");
+	MPI_File image;
 
-	inputImage = fopen(buffer,"rb");
+	MPI_Datatype ARRAY;
+    array_of_sizes[0] = height+2;
+    array_of_sizes[1] = width+2;
+ 	array_of_starts[0] = 1;
+    array_of_starts[1] = 1;
+    array_of_subsizes[0] = height;
+    array_of_subsizes[1] = width;
+    MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &ARRAY);
+    MPI_Type_commit(&ARRAY);
 
-	fread(data,dataSize,1,inputImage);
 
-	fclose(inputImage);
+    MPI_Datatype FILETYPE;
+    array_of_sizes[0] = Ny;
+    array_of_sizes[1] = Nx;
+    array_of_starts[0] = coords[1]*(height);
+    array_of_starts[1] = coords[0]*(width);
+    array_of_subsizes[0] = height;
+    array_of_subsizes[1] = width;
+    MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &FILETYPE);
+    MPI_Type_commit(&FILETYPE);
+
+
+
+	MPI_File_open(comm_cart,"../waterfall_grey_1920_2520.raw",MPI_MODE_RDWR,MPI_INFO_NULL,&image);
+	fileOffset = 0;
+	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
+    MPI_File_read_all(image, data,1,ARRAY,&fileStatus);
+
+    MPI_File_close(&image);
 
 	/* Create three datatypes by defining sections of the original array
 	 * Our array is treated as a 2 dimensional array and we are slicing 
@@ -364,6 +391,7 @@ int main(int argc, char* argv[])
 		recvRequestCount++;
 	}
 
+	t1 = MPI_Wtime();
 	while (steps < totalSteps)
 	{
 		steps++;		
@@ -380,8 +408,7 @@ int main(int argc, char* argv[])
 		**/
 		
 		MPI_Waitall(recvRequestCount,recvRequestArr,MPI_STATUSES_IGNORE);
-		MPI_Testall(recvRequestCount, recvRequestArr,&rf, recvRequestStatus);
-		printf("%d\n",rf);
+		//MPI_Testall(recvRequestCount, recvRequestArr,&rf, recvRequestStatus);
 		
 
 		/* calculate filter for outer with the halo points received 
@@ -396,40 +423,35 @@ int main(int argc, char* argv[])
 		 * before the next loop iteration */
 		
 		MPI_Waitall(sendRequestCount,sendRequestArr,MPI_STATUSES_IGNORE);
-		MPI_Testall(sendRequestCount, sendRequestArr,&sf, recvRequestStatus);
-		printf("%d\n",sf);
+		//MPI_Testall(sendRequestCount, sendRequestArr,&sf, recvRequestStatus);
 
 		swapImage(data,results);
 
 	}
+
+	t2 = MPI_Wtime();
+
+    Dt_local = t2 - t1;
+	MPI_Reduce(&Dt_local, &Dt_total, 1, MPI_DOUBLE, MPI_MAX, 0, comm_cart);	
+	
+	/* Elapsed times for the slowest process */
+	if (myRank == 0) {
+		
+		printf("Max. Total time: Dt = %.3f msec.\n\n", Dt_total * 1000);
+	}
 	
 
-	
-	FILE *outputImage;
-
-	strcat(buffer,"_o");
-
-	outputImage = fopen( buffer, "w" );
-	fwrite(data , 1 , dataSize , outputImage);
-	//fwrite(data , 1 , dataSize , outputImage);
-
-
-	fclose(outputImage);
+	MPI_File output;
 
 
 
-	FILE *output;
-
-	snprintf(buffer, 9, "%d", dims[1]*coords[0]+coords[1]);
-	strcat(buffer,".raw");
-	strcat(buffer,"_o");
-
-	output = fopen( buffer, "w" );
-	fwrite(data , 1 , dataSize , output);
-	//fwrite(data , 1 , dataSize , outputImage);
 
 
-	fclose(output);
+	MPI_File_open(comm_cart,"../outgrey.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
+	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
+    MPI_File_write_all(output, data,1,ARRAY,&fileStatus);
+
+    MPI_File_close(&output);  
 	
 	MPI_Finalize();
 

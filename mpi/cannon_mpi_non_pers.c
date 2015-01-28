@@ -481,7 +481,7 @@ int innerImageFilter(unsigned char *data,unsigned char* results)
 
 
 
-#pragma omp parallel for collapse(2)
+//#pragma omp parallel for collapse(2)
 	for(i = 2; i < height; i++)
 	{
 
