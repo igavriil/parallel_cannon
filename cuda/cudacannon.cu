@@ -10,7 +10,7 @@ __global__ void filter(unsigned char* d_data,unsigned char* d_results,int* d_fil
 	
 
 	int id = blockIdx.x * blockDim.x + threadIdx.x;
-	int outPixel;
+	int outPixel = 0;
 
 	if(id < 1920*2520 - 1)
 	{
@@ -31,6 +31,7 @@ __global__ void filter(unsigned char* d_data,unsigned char* d_results,int* d_fil
 		}
 
 		d_results[id] = (unsigned char)(outPixel/16);
+		__syncthreads();
 	}
 }
 
@@ -80,14 +81,14 @@ int main()
 	cudaMemcpy(d_data, h_data, size, cudaMemcpyHostToDevice);
 	cudaMalloc(&d_results, size);
 	cudaMalloc(&d_filter,9*sizeof(int));
-	cudaMemcpy(h_filter, d_filter, 9*sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_filter, h_filter, 9*sizeof(int), cudaMemcpyHostToDevice);
 
 
-	//for(i = 0; i < 50; i++ )
-	//{
+	for(i = 0; i < 300; i++ )
+	{
 		filter<<<7560,640>>>(d_data,d_results,d_filter);
-		//swap(&d_data,&d_results);
-	//}
+		 swap(&d_data,&d_results);
+	}
 
 	cudaMemcpy(h_results, d_results, size, cudaMemcpyDeviceToHost);
 
