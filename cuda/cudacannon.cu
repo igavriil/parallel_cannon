@@ -3,8 +3,8 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
-#define BLOCKSIZE_X 6
-#define BLOCKSIZE_Y 6
+#define BLOCKSIZE_X 16
+#define BLOCKSIZE_Y 18
 #define FILTER_LENGTH 9
 
 
@@ -47,7 +47,6 @@ __global__ void filter(unsigned char* d_data,unsigned char* d_results,int imageW
 				}
 			}
 		}
-		__syncthreads();
 
 		d_results[dOffset(gi,gj,imageW)] = (unsigned char)(outPixel/16);
 	}
@@ -84,6 +83,11 @@ int main()
 	imageH = 2520;
 	size = imageW* imageH;
 
+	cudaEvent_t start, stop;
+	float time;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+
 	h_data =(unsigned char*)malloc(size);
 	h_results =(unsigned char*)malloc(size);
 
@@ -99,23 +103,35 @@ int main()
 	printf("blocks x %d blocks y %d\n",numBlocks_X,numBlocks_Y );
 	dim3 gridSize(numBlocks_X, numBlocks_Y);
 
+	cudaEventRecord(start, 0);
+
 	cudaMalloc(&d_data, size);
 	cudaMemcpy(d_data, h_data, size, cudaMemcpyHostToDevice);
 	cudaMalloc(&d_results, size);
 	setFilter(h_filter);
 
 
-	for(i = 0; i < 20; i++ )
+	for(i = 0; i < 300; i++ )
 	{
 		filter<<<gridSize,blockSize>>>(d_data,d_results,imageW,imageH);
 		swap(&d_data,&d_results);
 	}
 
+	cudaEventRecord(stop, 0);
+	cudaEventSynchronize(stop);
+
 	cudaMemcpy(h_results, d_results, size, cudaMemcpyDeviceToHost);
+	cudaFree(d_results);
+	cudaFree(d_data);
 
 
 	FILE* outputImage;
 	outputImage = fopen("out.raw","w+");
 	fwrite(h_results,size,1,outputImage);
 	fclose(outputImage);
+
+	cudaEventElapsedTime(&time, start, stop);
+	printf ("Time for the kernel: %f ms\n", time);
+
+	return 0;
 }
