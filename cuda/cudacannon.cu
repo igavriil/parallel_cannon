@@ -3,35 +3,53 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
+#define BLOCKSIZE_X 6
+#define BLOCKSIZE_Y 6
+#define FILTER_LENGTH 9
 
-__global__ void filter(unsigned char* d_data,unsigned char* d_results,int* d_filter)
+
+__constant__ unsigned char c_Filter[FILTER_LENGTH];
+
+extern "C" void setFilter(unsigned char *h_Filter)
+{
+    cudaMemcpyToSymbol(c_Filter, h_Filter, FILTER_LENGTH * sizeof(unsigned char));
+}
+
+__device__ int dOffset(int x, int y,int imageW) {
+	return x*imageW + y;
+}
+
+__device__ int fOffset(int x, int y,int filterW) {
+	return x*filterW + y;
+}
+
+__global__ void filter(unsigned char* d_data,unsigned char* d_results,int imageW,int imageH)
 {
 	int k,l;
-	
+	int gi = blockIdx.y * blockDim.y + threadIdx.y;
+	int gj = blockIdx.x * blockDim.x + threadIdx.x;
 
-	int id = blockIdx.x * blockDim.x + threadIdx.x;
 	int outPixel = 0;
 
-	if(id < 1920*2520 - 1)
+	if(gi < imageH && gj < imageW)
 	{
-
 		for(k=-1;k<=1;k++)
 		{
 			for(l=-1;l<=1;l++)
 			{
-				if ( (id/1920-k)>=0 && (id/1920-k)<2520 && (id%1920-l)>=0 && (id%1920-l)<1920 )
+				if ( (gi+k)>=0 && (gi+k)<imageH && (gj+l)>=0 && (gj+l)<imageW )
 				{
-					outPixel += (d_data[(id/1920+k)*(1920)+(id%1920+l)]*d_filter[3*(k+1)+(l+1)]);
+					outPixel += d_data[dOffset(gi+k,gj+l,imageW)] * c_Filter[fOffset(k+1,l+1,3)];
 				}
 				else
 				{
-					outPixel += (d_data[id]*d_filter[3*(k+1)+(l+1)]);
+					outPixel += d_data[dOffset(gi,gj,imageW)] * c_Filter[fOffset(k+1,l+1,3)];
 				}
 			}
 		}
-
-		d_results[id] = (unsigned char)(outPixel/16);
 		__syncthreads();
+
+		d_results[dOffset(gi,gj,imageW)] = (unsigned char)(outPixel/16);
 	}
 }
 
@@ -42,21 +60,16 @@ void swap(unsigned char **d_data,unsigned char **d_results)
 	*d_results = temp;
 }
 
-
-
-
-
 int main()
 {
-	int size,i;
+	int size,i,imageW,imageH;
 	unsigned char *h_data;
 	unsigned char *h_results;
 
 	unsigned char *d_data;
 	unsigned char *d_results;
-	int *d_filter;
 
-	int h_filter[9];
+	unsigned char h_filter[9];
 	h_filter[0] = 1;
 	h_filter[1] = 2;
 	h_filter[2] = 1;
@@ -67,7 +80,9 @@ int main()
 	h_filter[7] = 2;
 	h_filter[8] = 1;
 
-	size = 2520*1920;
+	imageW = 1920;
+	imageH = 2520;
+	size = imageW* imageH;
 
 	h_data =(unsigned char*)malloc(size);
 	h_results =(unsigned char*)malloc(size);
@@ -77,24 +92,26 @@ int main()
 	fread(h_data,size,1,inputImage);
 	fclose(inputImage);
 
+
+	dim3 blockSize(BLOCKSIZE_X, BLOCKSIZE_Y);
+	int numBlocks_X = imageW / BLOCKSIZE_X;
+	int numBlocks_Y = imageH / BLOCKSIZE_Y;
+	printf("blocks x %d blocks y %d\n",numBlocks_X,numBlocks_Y );
+	dim3 gridSize(numBlocks_X, numBlocks_Y);
+
 	cudaMalloc(&d_data, size);
 	cudaMemcpy(d_data, h_data, size, cudaMemcpyHostToDevice);
 	cudaMalloc(&d_results, size);
-	cudaMalloc(&d_filter,9*sizeof(int));
-	cudaMemcpy(d_filter, h_filter, 9*sizeof(int), cudaMemcpyHostToDevice);
+	setFilter(h_filter);
 
 
-	for(i = 0; i < 300; i++ )
+	for(i = 0; i < 20; i++ )
 	{
-		filter<<<7560,640>>>(d_data,d_results,d_filter);
-		 swap(&d_data,&d_results);
+		filter<<<gridSize,blockSize>>>(d_data,d_results,imageW,imageH);
+		swap(&d_data,&d_results);
 	}
 
 	cudaMemcpy(h_results, d_results, size, cudaMemcpyDeviceToHost);
-
-	printf("%d \n",1/1920 );
-	printf("%d \n",1%1920 );
-	printf("hello\n");
 
 
 	FILE* outputImage;
