@@ -6,6 +6,7 @@
 #define BLOCKSIZE_X 16
 #define BLOCKSIZE_Y 18
 #define FILTER_LENGTH 9
+#define FILTER_RADIUS 1
 
 
 
@@ -20,8 +21,8 @@ __device__ int dOffset(int x, int y,int imageW) {
 	return x*imageW + y;
 }
 
-__device__ int fOffset(int x, int y,int filterW) {
-	return x*filterW + y;
+__device__ int fOffset(int x, int y) {
+	return x*(2*FILTER_RADIUS + 1) + y;
 }
 
 __global__ void filter(unsigned char* d_data,unsigned char* d_results,int imageW,int imageH)
@@ -40,11 +41,11 @@ __global__ void filter(unsigned char* d_data,unsigned char* d_results,int imageW
 			{
 				if ( (gi+k)>=0 && (gi+k)<imageH && (gj+l)>=0 && (gj+l)<imageW )
 				{
-					outPixel += d_data[dOffset(gi+k,gj+l,imageW)] * c_Filter[fOffset(k+1,l+1,3)];
+					outPixel += d_data[dOffset(gi+k,gj+l,imageW)] * c_Filter[fOffset(k+1,l+1)];
 				}
 				else
 				{
-					outPixel += d_data[dOffset(gi,gj,imageW)] * c_Filter[fOffset(k+1,l+1,3)];
+					outPixel += d_data[dOffset(gi,gj,imageW)] * c_Filter[fOffset(k+1,l+1)];
 				}
 			}
 		}
@@ -112,7 +113,7 @@ int main()
 	setFilter(h_filter);
 
 
-	for(i = 0; i < 100; i++ )
+	for(i = 0; i < 500; i++ )
 	{
 		filter<<<gridSize,blockSize>>>(d_data,d_results,imageW,imageH);
 		swap(&d_data,&d_results);
