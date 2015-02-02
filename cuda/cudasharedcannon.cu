@@ -1,265 +1,186 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <math.h>
-#include <omp.h>
+#include <cuda.h>
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
-#include "params.cuh"
 
-double dRand(double, double);
-inline int offset(int, int, int);
-int parseCmdLineArgs(int, char**);
-void cudaFiniteDiff(double*, double*);
-void computePhysics(double*);
-int queryDevices();
+#define BLOCKSIZE_X 16
+#define BLOCKSIZE_Y 18
+#define FILTER_LENGTH 9
+#define FILTER_RADIUS 1
 
-struct cudaDeviceProp deviceProp;
+__constant__ unsigned char c_Filter[FILTER_LENGTH];
 
-__device__ int dOffset(int x, int y) {
-	return y +  Y * x;
-}
-__device__ int sOffset(int x, int y) {
-	return  y + (BLOCKSIZE_Y + 2) * x;
+extern "C" void setFilter(unsigned char *h_Filter)
+{
+    cudaMemcpyToSymbol(c_Filter, h_Filter, FILTER_LENGTH * sizeof(unsigned char));
 }
 
-__global__ void finiteDiff(double *dData) {
-
-	int gi = blockIdx.x * blockDim.x + threadIdx.x; //global thread index - X
-	int gj = blockIdx.y * blockDim.y + threadIdx.y; //global thread index - Y
-
-	int li = threadIdx.x; //local thread index - X
-	int lj = threadIdx.y; //local thread index - Y
-
-	// shared data + space for halo elements
-	/* shared memory usage with 2x2x16 blocksize: (2+4)*(2+4)*(16+2)*8 = 5184 bytes. */
-	__shared__ double sData[(BLOCKSIZE_X + 2)*(BLOCKSIZE_Y + 2)];
-
-	// load a [BLOCKSIZE_X][BLOCKSIZE_Y][Z] block of data from global memory to shared.
-	sData[sOffset(li+1,lj+1)] = dData[dOffset(gi,gj,gk)];
-
-	// copy left and right halo elements from global memory
-	if (blockIdx.x == 0) {
-		// copy left periodic halo elements
-		if (li < 1) {
-			sData[sOffset(li,lj+1)] = dData[dOffset(gi+(X-1),gj)];
-		}
-	}
-
-	if (blockIdx.x > 0) {
-		// copy left halo elements
-		if (li < 1) {
-			sData[sOffset(li,lj+1)] = dData[dOffset(gi-1,gj)];
-		}
-	}
-
-	if (blockIdx.x == (gridDim.x - 1)) {
-		//copy right periodic halo elements
-		if (li >= BLOCKSIZE_X - 1) {
-			sData[sOffset(li+2,lj+1)] = dData[dOffset(gi-(X-1),gj,gk)];
-		}
-	}
-
-	if (blockIdx.x < (gridDim.x - 1)) {
-		//copy right halo elements
-		if (li >= BLOCKSIZE_X - 1) {
-			sData[sOffset(li+2,lj+1)] = dData[dOffset(gi+1,gj,gk)];
-		}
-	}
-
-	// copy top and bottom halo elements from global memory
-	if (blockIdx.y == 0) {
-		// copy top periodic halo elements
-		if (lj < 1) {
-			sData[sOffset(li+1,lj)] = dData[dOffset(gi,gj+(Y-1))];
-		}
-	}
-
-	if (blockIdx.y > 0) {
-		// copy top halo elements
-		if (lj < 1) {
-			sData[sOffset(li+1,lj)] = dData[dOffset(gi,gj-1)];
-		}
-	}
-
-	if (blockIdx.y == (gridDim.y - 1)) {
-		// copy bottom periodic halo elements
-		if (lj >= BLOCKSIZE_Y - 1) {
-			sData[sOffset(li+1,lj+2)] = dData[dOffset(gi,gj-(Y-1))];
-		}
-	}
-
-	if (blockIdx.y < (gridDim.y - 1)) {
-		// copy bottom halo elements
-		if (lj >= BLOCKSIZE_Y - 1) {
-			sData[sOffset(li+1,lj+2)] = dData[dOffset(gi,gj+1)];
-		}
-	}
-
-	__syncthreads(); // ensure all halo elements are available
-
-	// compute finite difference
-	dData[dOffset(gi,gj,gk)] = 
-		(4 * sData[sOffset(li+2,lj+2,lk+1)] + sData[sOffset(li+2 - 1,lj+2,lk+1)] 
-	+ sData[sOffset(li+2,lj+2 - 1,lk+1)] + sData[sOffset(li+2 - 2,lj+2,lk+1)] 
-	+ sData[sOffset(li+2 + 1,lj+2,lk+1)] + sData[sOffset(li+2,lj+2 + 1,lk+1)] 
-	+ sData[sOffset(li+2 + 2,lj+2,lk+1)] + sData[sOffset(li+2,lj+2 + 2,lk+1)] 
-	+ sData[sOffset(li+2,lj+2 - 2,lk+1)] + sData[sOffset(li+2,lj+2,lk+1 + 1)] 
-	+ sData[sOffset(li+2,lj+1,lk+1 - 1)]) / 14;
+__device__ int dOffset(int i, int j,int imageW) {
+	return i*imageW + j;
 }
 
-int steps;
-float Dt;
+__device__ int fOffset(int i, int j) {
+	return i*(2*FILTER_RADIUS + 1) + j;
+}
 
-int main(int argc, char** argv) {
+__device__ int lOffset(int i, int j) {
+	return i*BLOCKSIZE_X+ j  ;
+}
 
-	double *data, *results;
+__global__ void filter(unsigned char* d_data,unsigned char* d_results,int imageW,int imageH)
+{
 
-	if (parseCmdLineArgs(argc, argv) == 1) {
-		return 1;
-	}
+	int gl_x = blockIdx.x * blockDim.x + threadIdx.x;
+	int gl_y = blockIdx.y * blockDim.y + threadIdx.y;
 
-	if (queryDevices() == 1) {
-		printf("\nRunning with %dx%dx%d problem size.\n", X, Y, Z);
-		printf("\nDoing %d iterations.\n", steps);
-		data = (double*) calloc(X*Y*Z, sizeof(double));
-		results = (double*) calloc(X*Y*Z, sizeof(double));
-		checkMalloc(data);
-		srand((unsigned int)time(NULL));
-		for (int i = 0; i < X; i++) {
-			for (int j = 0; j < Y; j++) {
-				for (int k = 0; k < Z; k++) {
-					data[offset(i, j, k)] = dRand(10, 1000);
+	__shared__ unsigned char s_data[BLOCKSIZE_Y + 2*FILTER_RADIUS][BLOCKSIZE_X + 2*FILTER_RADIUS];
+
+	s_data[threadIdx.y + FILTER_RADIUS][threadIdx.x + FILTER_RADIUS] = d_data[dOffset(gl_y,gl_x,imageW)];
+
+	/* right */
+	if(threadIdx.x == 0 && gl_x != 0)
+		s_data[threadIdx.y + FILTER_RADIUS][threadIdx.x] = d_data[dOffset(gl_y ,gl_x - FILTER_RADIUS,imageW)];
+
+	/* left */
+	if(threadIdx.x == blockDim.x - 1  && gl_x != imageW - 1)
+		s_data[threadIdx.y + FILTER_RADIUS][threadIdx.x + 2*FILTER_RADIUS] = d_data[dOffset(gl_y ,gl_x + FILTER_RADIUS,imageW)];
+
+	/* top */
+	if(threadIdx.y == 0 && gl_y != 0)
+		s_data[threadIdx.y][threadIdx.x + FILTER_RADIUS] = d_data[dOffset(gl_y - FILTER_RADIUS ,gl_x,imageW)];
+
+ 	/* bottom */
+	if(threadIdx.y == blockDim.y -1 && gl_y != imageH - 1)
+		s_data[threadIdx.y + 2*FILTER_RADIUS][threadIdx.x+ FILTER_RADIUS] = d_data[dOffset(gl_y+ FILTER_RADIUS ,gl_x,imageW)];
+
+	/* top left */
+	if(threadIdx.x == 0 && gl_x != 0 && threadIdx.y == 0 && gl_y!= 0)
+		s_data[threadIdx.y][threadIdx.x] = d_data[dOffset(gl_y -FILTER_RADIUS,gl_x- FILTER_RADIUS,imageW)];
+
+	/* bottom left */
+	if(threadIdx.x == 0 && gl_x != 0 && threadIdx.y == blockDim.y - 1 && gl_y!= imageH - 1)
+		s_data[threadIdx.y + 2*FILTER_RADIUS][threadIdx.x] = d_data[dOffset(gl_y +FILTER_RADIUS,gl_x- FILTER_RADIUS,imageW)];
+
+	/* top right */
+	if(threadIdx.x == blockDim.x - 1 && gl_x != imageW - 1 && threadIdx.y == 0 && gl_y!= 0)
+		s_data[threadIdx.y][threadIdx.x+ 2*FILTER_RADIUS] = d_data[dOffset(gl_y -FILTER_RADIUS,gl_x+ FILTER_RADIUS,imageW)];
+
+	/* bottom right*/
+	if(threadIdx.x == blockDim.x - 1 && gl_x != imageW - 1 && threadIdx.y == blockDim.y - 1 && gl_y!= imageH - 1)
+		s_data[threadIdx.y + 2*FILTER_RADIUS][threadIdx.x+ 2*FILTER_RADIUS] = d_data[dOffset(gl_y +FILTER_RADIUS,gl_x+ FILTER_RADIUS,imageW)];
+
+	__syncthreads();
+
+	int k,l;
+	int outPixel = 0;
+	if(gl_x < imageW && gl_y < imageH)
+	{
+		for(k=-1;k<=1;k++)
+		{
+			for(l=-1;l<=1;l++)
+			{
+				if ( (gl_y+k)>=0 && (gl_y+k)<imageH && (gl_x+l)>=0 && (gl_x+l)<imageW )
+				{
+					outPixel += s_data[threadIdx.y+FILTER_RADIUS+k][threadIdx.x+FILTER_RADIUS+l] * c_Filter[fOffset(k+1,l+1)];
+				}
+				else
+				{
+					outPixel += s_data[threadIdx.y+FILTER_RADIUS][threadIdx.x+FILTER_RADIUS] * c_Filter[fOffset(k+1,l+1)];
 				}
 			}
 		}
-
-		cudaFiniteDiff(data, results);
-
-		printf("\nElapsed time: Dt = %.3f msec.\n", Dt);
-		printf("Average Bandwidth (GB/s): %.3f\n",
-			2.f * 1e-6 * X * Y * Z * steps * sizeof(double) / Dt);
-	} else {
-		printf("\nNo CUDA enabled devices found!\n");
-		return 1;
-	}
-
-	return 0;
+		d_results[dOffset(gl_y,gl_x,imageW)] = (unsigned char)(outPixel/16);
+	}	
+	
+	//d_results[dOffset(gl_y,gl_x,imageW)] = s_data[threadIdx.y + FILTER_RADIUS][threadIdx.x + FILTER_RADIUS];
 }
 
-double dRand(double dMin, double dMax) {
-	double d = (double) rand() / RAND_MAX;
-	return dMin + d * (dMax - dMin);
+void swap(unsigned char **d_data,unsigned char **d_results)
+{
+	unsigned char* temp = *d_data;
+	*d_data = *d_results;
+	*d_results = temp;
 }
 
-inline int offset(int x, int y, int z) {
-	return z + (Z * y) + (Z * Y * x);
-}
+int main()
+{
+	int size,i,imageW,imageH;
+	unsigned char *h_data;
+	unsigned char *h_results;
 
-void cudaFiniteDiff(double *data, double *results) {
+	unsigned char *d_data;
+	unsigned char *d_results;
 
-	int i = 0;
-	double *dData;
-	size_t size = X*Y*Z*sizeof(double);
+	unsigned char h_filter[9];
+	h_filter[0] = 1;
+	h_filter[1] = 2;
+	h_filter[2] = 1;
+	h_filter[3] = 2;
+	h_filter[4] = 4;
+	h_filter[5] = 2;
+	h_filter[6] = 1;
+	h_filter[7] = 2;
+	h_filter[8] = 1;
 
-	// allocate memory for the arrays on device
-	checkCuda(cudaMalloc(&dData, size));
-	// copy data to device
-	checkCuda(cudaMemcpy(dData, data, size, cudaMemcpyHostToDevice));
+	imageW = 1920;
+	imageH = 2520;
+	size = imageW* imageH;
 
-	// create a timing event
 	cudaEvent_t start, stop;
+	float time;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
 
-	checkCuda(cudaEventCreate(&start));
-	checkCuda(cudaEventCreate(&stop));
+	h_data =(unsigned char*)malloc(size);
+	h_results =(unsigned char*)malloc(size);
 
-	// default is 64 threads per block
-	dim3 blockSize(BLOCKSIZE_X, BLOCKSIZE_Y, BLOCKSIZE_Z);
-	int numBlocks_X = X / blockSize.x;
-	int numBlocks_Y = Y / blockSize.y;
-	int numBlocks_Z = Z / blockSize.z;
-	dim3 gridSize(numBlocks_X, numBlocks_Y, numBlocks_Z);
+	FILE* inputImage;
+	inputImage = fopen("../image.raw","rb");
+	fread(h_data,size,1,inputImage);
+	fclose(inputImage);
 
-	/* on devices of compute capability 3.0 or higher, set shared memory bank size to eight bytes.
-	* This can reduce bank conflicts when accessing double precision data. */
-	cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
 
-	// start the timing
-	checkCuda(cudaEventRecord(start));
-	/* spawn 2 threads: one handles the kernel launches while the other computes physics on CPU */
-#pragma omp parallel num_threads(2)
+	dim3 blockSize(BLOCKSIZE_X , BLOCKSIZE_Y);
+	int numBlocks_X = imageW / BLOCKSIZE_X;
+	int numBlocks_Y = imageH / BLOCKSIZE_Y;
+
+
+	dim3 gridSize(numBlocks_X, numBlocks_Y);
+
+	printf("blocks x %d blocks y %d\n",gridSize.x,gridSize.y );
+	printf("blocks x %d blocks y %d\n",blockSize.x,blockSize.y );
+
+
+	cudaEventRecord(start, 0);
+
+	cudaMalloc(&d_data, size);
+	cudaMemcpy(d_data, h_data, size, cudaMemcpyHostToDevice);
+	cudaMalloc(&d_results, size);
+	setFilter(h_filter);
+
+
+	for(i = 0; i < 100; i++)
 	{
-		if (omp_get_thread_num() == 0) {
-			for (i = 0; i < steps; i++) { 
-				// launch the kernel that computes the Jacobi finite difference on GPU
-				finiteDiff<<<gridSize, blockSize>>>(dData);
-			}
-		} else if (omp_get_thread_num() == 1) {
-			for (i = 0; i < steps; i++) { 
-				computePhysics(results);
-			}
-		}
+		filter<<<gridSize,blockSize>>>(d_data,d_results,imageW,imageH);
+		swap(&d_data,&d_results);
 	}
-	// stop timing
-	checkCuda(cudaEventRecord(stop));
 
-	// get elapsed time
-	checkCuda(cudaEventSynchronize(stop));
-	checkCuda(cudaEventElapsedTime(&Dt, start, stop));
-	checkCuda(cudaEventDestroy(start));
-	checkCuda(cudaEventDestroy(stop));
+	
 
-	// copy calculated arrays from device to host
-	checkCuda(cudaMemcpy(data, dData, size, cudaMemcpyDeviceToHost));
-	checkCuda(cudaFree(dData));
-	cudaDeviceReset();
-}
+	cudaMemcpy(h_results, d_results, size, cudaMemcpyDeviceToHost);
+	cudaFree(d_results);
+	cudaFree(d_data);
 
-// compute physics function. Data dependency is restricted within vertical columns.
-void computePhysics(double *results) {
-#pragma omp parallel for
-	for (int i = 0; i < X; i++) {
-#pragma omp parallel for
-		for (int j = 0; j < Y; j++) {
-			results[offset(i, j, 0)] = pow(S, 10);
-			for (int k = 1; k < Z; k++) {
-				results[offset(i, j, k)] = pow(
-					0.9 * results[offset(i, j, k - 1)], 10);
-			}
-		}
-	}
-}
+	cudaEventRecord(stop, 0);
+	cudaEventSynchronize(stop);
 
-// check available CUDA-capable devices on the system
-int queryDevices() {
-	int deviceCount;
-	cudaGetDeviceCount(&deviceCount);
-	if (deviceCount > 0) {
-		int device = 0; // we only use 1 GPU
-		checkCuda(cudaGetDeviceProperties(&deviceProp, device));
-		printf(
-			"\nGPU: %s with Compute Capability %d.%d, %d KB shared / %d MB global memory\n",
-			deviceProp.name, deviceProp.major, deviceProp.minor,
-			deviceProp.sharedMemPerBlock / 1024,
-			deviceProp.totalGlobalMem / 1048576);
-		return 1;
-	} else {
-		return 0;
-	}
-}
- 
-int parseCmdLineArgs(int argc, char** argv) {
-	if(argv[1] != NULL && strcmp(argv[1], "-steps") == 0) {
-		if (argv[2] != NULL) {
-			steps = atoi(argv[2]);
-		} else {
-			printf("\nMust specify number of iterations.\n");
-			return 1;
-		}
-	} else {
-		printf("\nMust specify number of iterations.\n");
-		return 1;
-	}
+	FILE* outputImage;
+	outputImage = fopen("out.raw","w+");
+	fwrite(h_results,size,1,outputImage);
+	fclose(outputImage);
+
+	cudaEventElapsedTime(&time, start, stop);
+	printf ("Time for the kernel: %f ms\n", time);
+
 	return 0;
 }

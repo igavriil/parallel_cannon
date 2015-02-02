@@ -8,6 +8,7 @@
 #define FILTER_LENGTH 9
 
 
+
 __constant__ unsigned char c_Filter[FILTER_LENGTH];
 
 extern "C" void setFilter(unsigned char *h_Filter)
@@ -26,8 +27,8 @@ __device__ int fOffset(int x, int y,int filterW) {
 __global__ void filter(unsigned char* d_data,unsigned char* d_results,int imageW,int imageH)
 {
 	int k,l;
-	int gi = blockIdx.y * blockDim.y + threadIdx.y;
-	int gj = blockIdx.x * blockDim.x + threadIdx.x;
+	const int gi = blockIdx.y * blockDim.y + threadIdx.y;
+	const int gj = blockIdx.x * blockDim.x + threadIdx.x;
 
 	int outPixel = 0;
 
@@ -111,7 +112,7 @@ int main()
 	setFilter(h_filter);
 
 
-	for(i = 0; i < 300; i++ )
+	for(i = 0; i < 100; i++ )
 	{
 		filter<<<gridSize,blockSize>>>(d_data,d_results,imageW,imageH);
 		swap(&d_data,&d_results);
@@ -134,4 +135,4 @@ int main()
 	printf ("Time for the kernel: %f ms\n", time);
 
 	return 0;
-}
+} 
