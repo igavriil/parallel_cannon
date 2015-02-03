@@ -113,7 +113,7 @@ int main()
 	setFilter(h_filter);
 
 
-	for(i = 0; i < 500; i++ )
+	for(i = 0; i < 100; i++ )
 	{
 		filter<<<gridSize,blockSize>>>(d_data,d_results,imageW,imageH);
 		swap(&d_data,&d_results);
