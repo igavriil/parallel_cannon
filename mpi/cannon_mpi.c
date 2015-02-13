@@ -20,11 +20,11 @@ int totalSteps;
 int reduceFreq; 
 /* filter array */
 int filter[3][3];
+/* input image path */
+char imagePath[45];
 
 
-
-
-int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
+int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank, char *imagePath);
 int offset(int i,int j, int k);
 int innerImageFilter(unsigned char *data,unsigned char* results);
 int outerImageFilter(unsigned char* data, unsigned char* results,int* coords);
@@ -32,7 +32,6 @@ unsigned char innerPixelFilter(unsigned char* data,int i, int j, int k);
 unsigned char outerPixelFilter(unsigned char* data,int i, int j, int k, int* flag);
 unsigned char cornerPixelFilter(unsigned char* data,int i, int j, int k, int* flag);
 void swapImage(unsigned char* data,unsigned char* results);
-int breakf();
 
 int main(int argc, char* argv[]) 
 {
@@ -115,7 +114,7 @@ int main(int argc, char* argv[])
 	MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
 
 	/* if uncorrect arguments are passed finalize MPI */
-	if (parseCmdLineArgs(argc, argv, dims, myRank) == 1) {
+	if (parseCmdLineArgs(argc, argv, dims, myRank, imagePath) == 1) {
 		MPI_Finalize();
 		return 1;
 	}
@@ -126,16 +125,16 @@ int main(int argc, char* argv[])
 	**/
 	width = (int) ceil((double) (Nx/ dims[0]));
 	height = (int) ceil((double) (Ny / dims[1]));
-	depth = 3;
 
 	/* print settings defined for the execution */
 	if (myRank == 0) {
 		printf("\nProblem grid: %dx%d.\n", Nx, Ny);
 		printf("P = %d processes.\n", numtasks);
-		printf("Sub-grid / process: %dx%d.\n", width, height);
-		printf("Sub-grid datasize: %d\n",(width+2)*(height+2));
+		printf("Sub-grid / process: %dx%dx%d.\n", width, height,depth);
+		printf("Sub-grid datasize: %d\n",(width+2)*(height+2)*depth);
 		printf("\nC = %d iterations.\n", totalSteps);
 		printf("Reduction performed every %d iteration(s).\n", reduceFreq);
+		printf("Input file path %s\n", imagePath);
 	}
 
 	/* There's not communication wraparound in the model. Outter image pixels are
@@ -200,7 +199,7 @@ int main(int argc, char* argv[])
 
 
 
-	MPI_File_open(comm_cart,"../waterfall_1920_2520.raw",MPI_MODE_RDWR,MPI_INFO_NULL,&image);
+	MPI_File_open(comm_cart,imagePath,MPI_MODE_RDWR,MPI_INFO_NULL,&image);
 	fileOffset = 0;
 	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
     MPI_File_read_all(image, data,1,ARRAY,&fileStatus);
@@ -461,7 +460,7 @@ int main(int argc, char* argv[])
 
 
 
-	MPI_File_open(comm_cart,"../outgrey.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
+	MPI_File_open(comm_cart,"../out.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
 	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
     MPI_File_write_all(output, data,1,ARRAY,&fileStatus);
 
@@ -498,10 +497,6 @@ void swapImage(unsigned char* data,unsigned char* results)
 	/*unsigned char* temp = *data;
 	*data = *results;
 	*results = temp;*/
-}
-int breakf()
-{
-	printf("break\n");
 }
 
 int innerImageFilter(unsigned char *data,unsigned char* results)
@@ -790,7 +785,7 @@ unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int k,int* flag
 
 
 
-int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
+int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank, char *imagePath) {
 	/*
 	Nx = 1920;
 	Ny = 2520;
@@ -810,16 +805,16 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		} else {
 			if (myRank == 0) {
 				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 			}
 			return 1;
 		}
 	} else {
 		if (myRank == 0) {
 			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 		}
 		return 1;
 	}
@@ -832,16 +827,16 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		} else {
 			if (myRank == 0) {
 				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 			}
 			return 1;
 		}
 	} else {
 		if (myRank == 0) {
 			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 		}
 		return 1;
 	}
@@ -862,16 +857,16 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		} else {
 			if (myRank == 0) {
 				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 			}
 			return 1;
 		}
 	} else {
 		if (myRank == 0) {
 			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 		}
 		return 1;
 	}
@@ -882,16 +877,56 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		} else {
 			if (myRank == 0) {
 				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 			}
 			return 1;
 		}
 	} else {
 		if (myRank == 0) {
 			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
+		}
+		return 1;
+	}
+
+	if (argv[11] != NULL && strcmp(argv[11], "-channels") == 0) {
+		if (argv[12] != NULL) {
+			depth = (int) atoi(argv[12]);
+		} else {
+			if (myRank == 0) {
+				printf(
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
+			}
+			return 1;
+		}
+	} else {
+		if (myRank == 0) {
+			printf(
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
+		}
+		return 1;
+	}
+
+	if (argv[13] != NULL && strcmp(argv[13], "-path") == 0) {
+		if (argv[14] != NULL) {
+			strcpy(imagePath, argv[14]);
+		} else {
+			if (myRank == 0) {
+				printf(
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
+			}
+			return 1;
+		}
+	} else {
+		if (myRank == 0) {
+			printf(
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 		}
 		return 1;
 	}
