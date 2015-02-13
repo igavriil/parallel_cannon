@@ -10,11 +10,11 @@ int numtasks;
 /* image-grid dimensions */
 int Nx,Ny;
 /* the part of the grid allocate in each process */
-int width,height;
+int width,height,depth;
 /* number of processes in each dimension */
 int dims[2];
-/* width and height counters */
-int i,j;
+/* width height and depth counters */
+int i,j,k;
 /* number of iterations */
 int totalSteps; 
 /* redunction frequence in steps */
@@ -25,15 +25,14 @@ int filter[3][3];
 
 
 
-int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank);
-int offset(int i,int j);
+int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank, char *imagePath);
+int offset(int i,int j, int k);
 int innerImageFilter(unsigned char *data,unsigned char* results);
 int outerImageFilter(unsigned char* data, unsigned char* results,int* coords);
-unsigned char innerPixelFilter(unsigned char* data,int i, int j);
-unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag);
-unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag);
+unsigned char innerPixelFilter(unsigned char* data,int i, int j, int k);
+unsigned char outerPixelFilter(unsigned char* data,int i, int j, int k, int* flag);
+unsigned char cornerPixelFilter(unsigned char* data,int i, int j, int k, int* flag);
 void swapImage(unsigned char** data,unsigned char** results);
-int breakf();
 
 int main(int argc, char* argv[]) 
 {
@@ -60,6 +59,8 @@ int main(int argc, char* argv[])
 	int dataSize;
 	/* computation steps */
 	int steps = 0; 
+	/* input image path */
+	char imagePath[45];
 
 	double t1,t2,Dt_local,Dt_total;
 
@@ -96,13 +97,13 @@ int main(int argc, char* argv[])
 	int recvRequestCount = 0;
 	int sendRequestCount = 0;
 	/* array size for create_subarray function */
-	int array_of_sizes[2];
+	int array_of_sizes[3];
 	/* subarray size to be created from the initial array */
-	int array_of_subsizes[2];
+	int array_of_subsizes[3];
 	/* address of the initial address where subarray cutting starts */
-	int array_of_starts[2];
+	int array_of_starts[3];
 	/* dimensions of initial array and subarray to be produced */
-	int sub_dims = 2;
+	int sub_dims = 3;
 	/* dimensions for the cartesian grid */
 	int ndims = 2;
 	/* start MPI */
@@ -113,7 +114,7 @@ int main(int argc, char* argv[])
 	MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
 
 	/* if uncorrect arguments are passed finalize MPI */
-	if (parseCmdLineArgs(argc, argv, dims, myRank) == 1) {
+	if (parseCmdLineArgs(argc, argv, dims, myRank, imagePath) == 1) {
 		MPI_Finalize();
 		return 1;
 	}
@@ -129,10 +130,11 @@ int main(int argc, char* argv[])
 	if (myRank == 0) {
 		printf("\nProblem grid: %dx%d.\n", Nx, Ny);
 		printf("P = %d processes.\n", numtasks);
-		printf("Sub-grid / process: %dx%d.\n", width, height);
-		printf("Sub-grid datasize: %d\n",(width+2)*(height+2));
+		printf("Sub-grid / process: %dx%dx%d.\n", width, height,depth);
+		printf("Sub-grid datasize: %d\n",(width+2)*(height+2)*depth);
 		printf("\nC = %d iterations.\n", totalSteps);
 		printf("Reduction performed every %d iteration(s).\n", reduceFreq);
+		printf("Input file path %s\n", imagePath);
 	}
 
 	/* There's not communication wraparound in the model. Outter image pixels are
@@ -154,7 +156,7 @@ int main(int argc, char* argv[])
 	/* Calculate datasize for the process adding padding for halo points.
 	 * Padding needed for the algorithm is one pixel at each outter pixel
 	**/
-	dataSize = (width+2)*(height+2);
+	dataSize = (width+2)*(height+2)*depth;
 	/* Allocate empty space for data to be read and output data calculated 
 	 * from the filtering algorithm. Data are stored as 1D array in the 
 	 * memory
@@ -170,28 +172,35 @@ int main(int argc, char* argv[])
 
 	MPI_Datatype ARRAY;
     array_of_sizes[0] = height+2;
-    array_of_sizes[1] = width+2;
+    array_of_sizes[1] = (width+2);
+    array_of_sizes[2] = depth;
  	array_of_starts[0] = 1;
     array_of_starts[1] = 1;
+    array_of_starts[2] = 0;
     array_of_subsizes[0] = height;
     array_of_subsizes[1] = width;
+    array_of_subsizes[2] = depth;
     MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &ARRAY);
     MPI_Type_commit(&ARRAY);
 
 
     MPI_Datatype FILETYPE;
+
     array_of_sizes[0] = Ny;
     array_of_sizes[1] = Nx;
+    array_of_sizes[2] = depth;
     array_of_starts[0] = coords[1]*(height);
     array_of_starts[1] = coords[0]*(width);
+    array_of_starts[2] = 0;
     array_of_subsizes[0] = height;
     array_of_subsizes[1] = width;
+    array_of_subsizes[2] = depth;
     MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &FILETYPE);
     MPI_Type_commit(&FILETYPE);
 
 
 
-	MPI_File_open(comm_cart,"../waterfall_grey_1920_2520.raw",MPI_MODE_RDWR,MPI_INFO_NULL,&image);
+	MPI_File_open(comm_cart,imagePath,MPI_MODE_RDWR,MPI_INFO_NULL,&image);
 	fileOffset = 0;
 	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
     MPI_File_read_all(image, data,1,ARRAY,&fileStatus);
@@ -209,17 +218,20 @@ int main(int argc, char* argv[])
 	**/
 	array_of_sizes[0] = height + 2;
 	array_of_sizes[1] = width + 2;
+	array_of_sizes[2] = depth;
 	/* define the starting position - address for the slices to be cutted. We set 
 	 * those to (0,0) in order to generalize this datatypes
 	**/
 	array_of_starts[0] = 0;
 	array_of_starts[1] = 0;
+	array_of_starts[2] = 0;
 
 	/* slicing a COLUMN from the 2 dimensional array */
 	MPI_Datatype COLUMN;
 	/* a column consists of 2D array with [1] column and [height] rows */
 	array_of_subsizes[0] = height;
 	array_of_subsizes[1] = 1;
+	array_of_subsizes[2] = depth;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &COLUMN);
 	/* assing the subarray to the datatype */
@@ -230,6 +242,7 @@ int main(int argc, char* argv[])
 	/* a row consists of 2D array with [1] row and [width] columns */
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = width;
+	array_of_subsizes[2] = depth;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &ROW);
 	/* assing the subarray to the datatype */
@@ -240,6 +253,7 @@ int main(int argc, char* argv[])
 	/* a point consists of 2D array with [1] column and [1] rows*/
 	array_of_subsizes[0] = 1;
 	array_of_subsizes[1] = 1;
+	array_of_subsizes[2] = depth;
 	MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,
 			array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &POINT);
 	/* assing the subarray to the datatype */
@@ -275,11 +289,11 @@ int main(int argc, char* argv[])
 		errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 		if (errCode == MPI_SUCCESS) {
 			/* take the column starting at ([1]-row,[1]-column) address and send */
-			MPI_Isend(&data[offset(1,1)], 1, COLUMN, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
+			MPI_Isend(&data[offset(1,1,0)], 1, COLUMN, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
 			sendRequestCount++;
 			source = dest;
 			/* set starting position at ([1]-row,[0]-column) and place the received column */
-			MPI_Irecv(&data[offset(1,0)], 1, COLUMN, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
+			MPI_Irecv(&data[offset(1,0,0)], 1, COLUMN, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 
 		}
@@ -290,11 +304,11 @@ int main(int argc, char* argv[])
 		errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 		if (errCode == MPI_SUCCESS) {
 			/* take the column starting at ([1]-row,[width]-column) address and send */
-			MPI_Isend(&data[offset(1,width)], 1, COLUMN, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
+			MPI_Isend(&data[offset(1,width,0)], 1, COLUMN, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
 			sendRequestCount++;
 			source = dest;
 			/* set starting position at ([1]-row,[width+1]-column) and place the received column */
-			MPI_Irecv(&data[offset(1,width+1)], 1, COLUMN, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
+			MPI_Irecv(&data[offset(1,width+1,0)], 1, COLUMN, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 		}
 
@@ -304,11 +318,11 @@ int main(int argc, char* argv[])
 		errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 		if (errCode == MPI_SUCCESS) {
 			/* take the row starting at ([height]-row,[1]-column) address and send */
-			MPI_Isend(&data[offset(height,1)], 1, ROW, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
+			MPI_Isend(&data[offset(height,1,0)], 1, ROW, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
 			sendRequestCount++;
 			source = dest;
 			/* set starting position at ([height+1]-row,[1]-column) and place the received row */
-			MPI_Irecv(&data[offset(height+1,1)], 1, ROW, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
+			MPI_Irecv(&data[offset(height+1,1,0)], 1, ROW, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 		}
 
@@ -318,11 +332,11 @@ int main(int argc, char* argv[])
 		errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 		if (errCode == MPI_SUCCESS) {
 			/* take the row starting at ([1]-row,[1]-column) address and send */
-			MPI_Isend(&data[offset(1,1)], 1, ROW, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
+			MPI_Isend(&data[offset(1,1,0)], 1, ROW, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
 			sendRequestCount++;
 			source = dest;
 			/* set starting position at ([0]-row,[1]-column) and place the received row */
-			MPI_Irecv(&data[offset(0,1)], 1, ROW, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
+			MPI_Irecv(&data[offset(0,1,0)], 1, ROW, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 		}
 
@@ -332,11 +346,11 @@ int main(int argc, char* argv[])
 		errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 		if (errCode == MPI_SUCCESS && 1) {
 			/* take the point starting at ([height]-row,[width]-column) address and send */
-			MPI_Isend(&data[offset(height,width)], 1, POINT, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
+			MPI_Isend(&data[offset(height,width,0)], 1, POINT, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
 			sendRequestCount++;
 			source = dest;
 			/* set starting position at ([height+1]-row,[width+1]-column) and place the received point */
-			MPI_Irecv(&data[offset(height+1,width+1)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
+			MPI_Irecv(&data[offset(height+1,width+1,0)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 		}
 
@@ -346,11 +360,11 @@ int main(int argc, char* argv[])
 		errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 		if (errCode == MPI_SUCCESS) {
 			/* take the point starting at ([1]-row,[width]-column) address and send */
-			MPI_Isend(&data[offset(1,width)], 1, POINT, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
+			MPI_Isend(&data[offset(1,width,0)], 1, POINT, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
 			sendRequestCount++;
 			source = dest;
 			/* set starting position at ([0]-row,[width+1]-column) and place the received point */
-			MPI_Irecv(&data[offset(0,width+1)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
+			MPI_Irecv(&data[offset(0,width+1,0)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 		}
 
@@ -360,11 +374,11 @@ int main(int argc, char* argv[])
 		errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 		if (errCode == MPI_SUCCESS) {
 			/* take the point starting at ([height]-row,[1]-column) address and send */
-			MPI_Isend(&data[offset(height,1)], 1, POINT, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
+			MPI_Isend(&data[offset(height,1,0)], 1, POINT, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
 			sendRequestCount++;
 			source = dest;
 			/* set starting position at ([height+1]-row,[0]-column) and place the received point */
-			MPI_Irecv(&data[offset(height+1,0)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
+			MPI_Irecv(&data[offset(height+1,0,0)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 		}
 
@@ -374,11 +388,11 @@ int main(int argc, char* argv[])
 		errCode = MPI_Cart_rank(comm_cart, nextCoords, &dest);
 		if (errCode == MPI_SUCCESS) {
 			/* take the point starting at ([1]-row,[1]-column) address and send */
-			MPI_Isend(&data[offset(1,1)], 1, POINT, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
+			MPI_Isend(&data[offset(1,1,0)], 1, POINT, dest, tag,comm_cart,&sendRequestArr[sendRequestCount]);
 			sendRequestCount++;
 			source = dest;
 			/* set starting position at ([0]-row,[0]-column) and place the received point */
-			MPI_Irecv(&data[offset(0,0)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
+			MPI_Irecv(&data[offset(0,0,0)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 		}
 		
@@ -433,7 +447,7 @@ int main(int argc, char* argv[])
 
 
 
-	MPI_File_open(comm_cart,"../outgrey.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
+	MPI_File_open(comm_cart,"../out.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
 	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
     MPI_File_write_all(output, data,1,ARRAY,&fileStatus);
 
@@ -452,9 +466,9 @@ int main(int argc, char* argv[])
 /* returns the offset of an element in a 2D array of dimensions (width,height) 
  * allocated in row major order
 **/
-int offset(int i,int j)
+int offset(int i, int j, int k)
 {
-	return i*(width+2)+j;
+	return i*((width+2)*depth)+ j*depth + k;
 }
 
 void swapImage(unsigned char** data,unsigned char** results)
@@ -471,38 +485,34 @@ void swapImage(unsigned char** data,unsigned char** results)
 	*data = *results;
 	*results = temp;
 }
-int breakf()
-{
-	printf("break\n");
-}
+
 
 int innerImageFilter(unsigned char *data,unsigned char* results)
 {
-
-
-
-//#pragma omp parallel for collapse(2)
-	for(i = 2; i < height; i++)
+	for(k = 0; k<depth; k++)
 	{
-
-		for(j = 2; j < width; j++)
+//#pragma omp parallel for collaper(2)
+		for(i = 2; i < height; i++)
 		{
-			results[offset(i,j)] = innerPixelFilter(data,i,j);
+			for(j = 2; j < width; j++)
+			{
+				results[offset(i,j,k)] = innerPixelFilter(data,i,j,k);
+			}
 		}
 	}
 	return 1;
 }
 
-unsigned char innerPixelFilter(unsigned char* data,int i, int j)
+unsigned char innerPixelFilter(unsigned char* data,int i, int j, int k)
 {
-	int k,l;
+	int m,l;
 	int outPixel = 0;
 
-	for(k=-1;k<=1;k++)
+	for(m=-1;m<=1;m++)
 	{
 		for(l=-1;l<=1;l++)
 		{
-				outPixel += (data[offset((i+k),(j+l))]*filter[k+1][l+1]);
+				outPixel += (data[offset((i+m),(j+l),k)]*filter[m+1][l+1]);
 		}
 	}
 	return (unsigned char)(outPixel/16);
@@ -528,9 +538,12 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	if(coords[1]!=0)
 	{
 		i = 1; /* first row */
-		for(j = 1; j < width+1; j++)
+		for(k = 0; k< depth; k++)
 		{
-			results[offset(i,j)] = innerPixelFilter(data,i,j);
+			for(j = 1; j < width+1; j++)
+			{
+				results[offset(i,j,k)] = innerPixelFilter(data,i,j,k);
+			}
 		}
 	}
 	/* if the TOP part of the process is a TOP part on the initial image, pass the information 
@@ -541,9 +554,12 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 		i = 1; /* first row */
 		flag[0] = 0;
 		flag[1] = -1;
-		for(j = 1; j < width+1; j++)
+		for(k = 0; k< depth; k++)
 		{
-			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
+			for(j = 1; j < width+1; j++)
+			{
+				results[offset(i,j,k)] = outerPixelFilter(data,i,j,k,flag);
+			}
 		}
 	}
 
@@ -556,10 +572,12 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	if(coords[1]!= dims[0]-1)
 	{
 		i = height; /* [height] row */
-		for(j = 1; j < width+1; j++)
+		for(k = 0; k< depth; k++)
 		{
-			results[offset(i,j)] = innerPixelFilter(data,i,j);
-
+			for(j = 1; j < width+1; j++)
+			{
+				results[offset(i,j,k)] = innerPixelFilter(data,i,j,k);
+			}
 		}
 	}
 	/* if the BOTTOM part of the process is a BOOTOM part on the initial image, pass the information 
@@ -570,9 +588,12 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 		i = height; /* [height] row */
 		flag[0] = 0;
 		flag[1] = 1;
-		for(j = 1; j < width+1 ; j++)
+		for(k = 0; k< depth; k++)
 		{
-			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
+			for(j = 1; j < width+1 ; j++)
+			{
+				results[offset(i,j,k)] = outerPixelFilter(data,i,j,k,flag);
+			}
 		}
 	}
 
@@ -586,13 +607,15 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	if(coords[0]!=0)
 	{
 		j = 1; /* first column */
-		for(i = 2; i < height; i++)
+		for(k = 0; k< depth; k++)
 		{
-			results[offset(i,j)] = innerPixelFilter(data,i,j);
-
+			for(i = 2; i < height; i++)
+			{
+				results[offset(i,j,k)] = innerPixelFilter(data,i,j,k);
+			}
 		}
 	}
-	/* if the LEFT part of the process is a LEFT part on the initial image, pass the information 
+	/*if the LEFT part of the process is a LEFT part on the initial image, pass the information 
 	 * that those pixels belong to the LEFT image part, and so LEFT neighboors does not exist
 	**/
 	else
@@ -600,9 +623,12 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 		j = 1; /* first column */
 		flag[0] = 1;
 		flag[1] = -1;
-		for(i = 2; i < height; i++)
+		for(k = 0; k< depth; k++)
 		{
-			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
+			for(i = 2; i < height; i++)
+			{
+				results[offset(i,j,k)] = outerPixelFilter(data,i,j,k,flag);
+			}
 		}
 	}
 
@@ -616,10 +642,12 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	if(coords[0] != dims[1] - 1) 	
 	{
 		j = width; /* [width] column */
-		for(i = 2; i < height; i++)
+		for(k = 0; k< depth; k++)
 		{
-			results[offset(i,j)] = innerPixelFilter(data,i,j);
-
+			for(i = 2; i < height; i++)
+			{
+				results[offset(i,j,k)] = innerPixelFilter(data,i,j,k);
+			}
 		}
 	}
 	/* if the RIGHT part of the process is a RIGHT part on the initial image, pass the information 
@@ -630,9 +658,12 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 		j = width; /* [width] column */
 		flag[0] = 1;
 		flag[1] = 1;
-		for(i = 2; i < height; i++)
+		for(k = 0; k< depth; k++)
 		{
-			results[offset(i,j)] = outerPixelFilter(data,i,j,flag);
+			for(i = 2; i < height; i++)
+			{
+				results[offset(i,j,k)] = outerPixelFilter(data,i,j,k,flag);
+			}
 		}
 	}
 	/*
@@ -646,8 +677,10 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	{
 		flag[0] = -1;
 		flag[1] = -1;
-
-		results[offset(1,1)] = cornerPixelFilter(data,1,1,flag);
+		for(k = 0; k< depth; k++)
+		{
+			results[offset(1,1,k)] = cornerPixelFilter(data,1,1,k,flag);
+		}
 	}
 	/* 
 	 * For the TOP-RIGHT process of the image and the top-right pixel (excluding halo point)
@@ -658,8 +691,10 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	{
 		flag[0] = -1;
 		flag[1] = 1;
-
-		results[offset(1,width)] = cornerPixelFilter(data,1,width,flag);
+		for(k = 0; k< depth; k++)
+		{
+			results[offset(1,width,k)] = cornerPixelFilter(data,1,width,k,flag);
+		}
 	}
 	/* 
 	 * For the BOTTOM-LEFT process of the image and the bottom-left pixel (excluding halo point)
@@ -669,8 +704,10 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	{
 		flag[0] = 1;
 		flag[1] = -1;
-
-		results[offset(height,1)] = cornerPixelFilter(data,height,1,flag);
+		for(k = 0; k< depth; k++)
+		{
+			results[offset(height,1,k)] = cornerPixelFilter(data,height,1,k,flag);
+		}
 	}
 	/* 
 	 * For the BOTTOM-right process of the image and the bottom-right pixel (excluding halo point)
@@ -680,8 +717,10 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 	{
 		flag[0] = 1;
 		flag[1] = 1;
-
-		results[offset(height,width)] = cornerPixelFilter(data,height,width,flag);
+		for(k = 0; k< depth; k++)
+		{
+			results[offset(height,width,k)] = cornerPixelFilter(data,height,width,k,flag);
+		}
 	}
 
 	return 1;
@@ -689,44 +728,44 @@ int outerImageFilter(unsigned char* data, unsigned char* results,int* coords)
 
 
 
-unsigned char outerPixelFilter(unsigned char* data,int i, int j,int* flag)
+unsigned char outerPixelFilter(unsigned char* data,int i, int j, int k,int* flag)
 {
-	int k,l;
+	int m,l;
 	int outPixel = 0;
 
-	for(k=-1;k<=1;k++)
+	for(m=-1;m<=1;m++)
 	{
 		for(l=-1;l<=1;l++)
 		{
-			if( ((flag[0]==0) && (k==flag[1])) || ((flag[0]==1) && (l==flag[1]))   )
+			if( ((flag[0]==0) && (m==flag[1])) || ((flag[0]==1) && (l==flag[1]))   )
 			{
-				outPixel += (data[offset(i,j)]*filter[k+1][l+1]);	
+				outPixel += (data[offset(i,j,k)]*filter[m+1][l+1]);	
 			}
 			else
 			{
-				outPixel += (data[offset((i+k),(j+l))]*filter[k+1][l+1]);
+				outPixel += (data[offset((i+m),(j+l),k)]*filter[m+1][l+1]);
 			}
 		}
 	}
 	return (unsigned char)(outPixel/16);
 }
 
-unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag)
+unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int k,int* flag)
 {
-	int k,l;
+	int m,l;
 	int outPixel = 0;
 
-	for(k=-1;k<=1;k++)
+	for(m=-1;m<=1;m++)
 	{
 		for(l=-1;l<=1;l++)
 		{
-			if(k==flag[0] && l==flag[1])
+			if(m==flag[0] && l==flag[1])
 			{
-				outPixel += (data[offset((i),(j))]*filter[k+1][l+1]);	
+				outPixel += (data[offset(i,j,k)]*filter[m+1][l+1]);	
 			}
 			else
 			{
-				outPixel += (data[offset((i+k),(j+l))]*filter[k+1][l+1]);
+				outPixel += (data[offset((i+m),(j+l),k)]*filter[m+1][l+1]);
 			}
 		}
 	}
@@ -735,7 +774,7 @@ unsigned char cornerPixelFilter(unsigned char* data,int i, int j,int* flag)
 
 
 
-int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
+int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank, char *imagePath) {
 	/*
 	Nx = 1920;
 	Ny = 2520;
@@ -755,16 +794,16 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		} else {
 			if (myRank == 0) {
 				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 			}
 			return 1;
 		}
 	} else {
 		if (myRank == 0) {
 			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 		}
 		return 1;
 	}
@@ -777,16 +816,16 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		} else {
 			if (myRank == 0) {
 				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 			}
 			return 1;
 		}
 	} else {
 		if (myRank == 0) {
 			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 		}
 		return 1;
 	}
@@ -807,16 +846,16 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		} else {
 			if (myRank == 0) {
 				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 			}
 			return 1;
 		}
 	} else {
 		if (myRank == 0) {
 			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 		}
 		return 1;
 	}
@@ -827,16 +866,56 @@ int parseCmdLineArgs(int argc, char **argv, int *dims, int myRank) {
 		} else {
 			if (myRank == 0) {
 				printf(
-						"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 			}
 			return 1;
 		}
 	} else {
 		if (myRank == 0) {
 			printf(
-					"\nSpecify grid of nodes, grid of processes, number of iterations and reduction frequency"
-							" [-nodes <Nx> <Ny>  -procs <i> <j> -steps <n> -reduce <f>]\n\n");
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
+		}
+		return 1;
+	}
+
+	if (argv[11] != NULL && strcmp(argv[11], "-channels") == 0) {
+		if (argv[12] != NULL) {
+			depth = (int) atoi(argv[12]);
+		} else {
+			if (myRank == 0) {
+				printf(
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
+			}
+			return 1;
+		}
+	} else {
+		if (myRank == 0) {
+			printf(
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
+		}
+		return 1;
+	}
+
+	if (argv[13] != NULL && strcmp(argv[13], "-path") == 0) {
+		if (argv[14] != NULL) {
+			strcpy(imagePath, argv[14]);
+		} else {
+			if (myRank == 0) {
+				printf(
+						"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
+			}
+			return 1;
+		}
+	} else {
+		if (myRank == 0) {
+			printf(
+					"\nSpecify grid of nodes, grid of processes, number of iterations, reduction frequency, channels and path"
+								" [-nodes <Nx> <Ny> -procs <i> <j> -steps <n> -reduce <f> -channels <c> -path <p>]\n\n");
 		}
 		return 1;
 	}
