@@ -62,7 +62,14 @@ int main(int argc, char* argv[])
 	/* input image path */
 	char imagePath[45];
 
-	double t1,t2,Dt_local,Dt_total;
+	double t1, t2, Dt_local, Dt_total;
+	double tIOread1 = 0, tIOread2 =0, tIOwrite1=0, tIOwrite2 = 0, DtIO_local, DtIO_total;
+	double t1_comm_sendrecv = 0, t2_comm_sendrecv = 0, t1_comm_wait_recv = 0,
+			t2_comm_wait_recv = 0, t1_comm_wait_send = 0, t2_comm_wait_send = 0,
+			Dt_local_comm, Dt_total_comm;
+	double t1_inner_comp = 0, t2_inner_comp = 0, t1_outer_comp = 0, t2_outer_comp = 0,
+			Dt_local_comp, Dt_total_comp;
+
 
 	int sf;
 	int rf;
@@ -153,6 +160,8 @@ int main(int argc, char* argv[])
 	/* get process coordinates in grid - Cartesian communicator */
 	MPI_Cart_coords(comm_cart, myGridRank, ndims, coords);
 
+	t1 = MPI_Wtime();
+
 	/* Calculate datasize for the process adding padding for halo points.
 	 * Padding needed for the algorithm is one pixel at each outter pixel
 	**/
@@ -164,7 +173,7 @@ int main(int argc, char* argv[])
 	data = calloc(dataSize, sizeof(unsigned char));
 	results = calloc(dataSize, sizeof(unsigned char));
 
-	
+	tIOread1 += MPI_Wtime();
 	/* find process rank using the cartesian coordinates and assigh the appropiate
 	 * part of image previously splitted 
 	**/
@@ -199,13 +208,14 @@ int main(int argc, char* argv[])
     MPI_Type_commit(&FILETYPE);
 
 
-
 	MPI_File_open(comm_cart,imagePath,MPI_MODE_RDWR,MPI_INFO_NULL,&image);
 	fileOffset = 0;
 	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
     MPI_File_read_all(image, data,1,ARRAY,&fileStatus);
 
     MPI_File_close(&image);
+
+    tIOread2 += MPI_Wtime();
 
 	
 	/* Create three datatypes by defining sections of the original array
@@ -259,6 +269,7 @@ int main(int argc, char* argv[])
 	/* assing the subarray to the datatype */
 	MPI_Type_commit(&POINT);
 
+
 	/* The predefined default error handler, which is
 	 * MPI_ERRORS_ARE_FATAL, for a newly created communicator or
 	 * for MPI_COMM_WORLD is to abort the  whole parallel program
@@ -271,8 +282,6 @@ int main(int argc, char* argv[])
 		MPI_Errhandler_set(comm_cart, MPI_ERRORS_RETURN);
 	}
 
-	t1 = MPI_Wtime();
-
 	while (steps < totalSteps)
 	{
 		recvRequestCount = 0;
@@ -280,6 +289,8 @@ int main(int argc, char* argv[])
 
 		steps++;
 
+
+		t1_comm_sendrecv += MPI_Wtime();
 		/* Locate neighboring processes in the grid and initiate a send-receive
 		 * operation for each neighbor found 
 		**/
@@ -395,63 +406,75 @@ int main(int argc, char* argv[])
 			MPI_Irecv(&data[offset(0,0,0)], 1, POINT, source, tag,comm_cart,&recvRequestArr[recvRequestCount]);
 			recvRequestCount++;
 		}
-		
+		t2_comm_sendrecv += MPI_Wtime();
+
+		t1_inner_comp += MPI_Wtime();
 		/* calculate filter for inner data - no need for communication */
 		innerImageFilter(data,results);
+		t2_inner_comp += MPI_Wtime();
 		
 
+		t1_comm_wait_recv += MPI_Wtime();
 		/* before continuing to compute outer image make sure all messages 
 		 * are received
 		**/
-		
 		MPI_Waitall(recvRequestCount,recvRequestArr,MPI_STATUSES_IGNORE);
 		//MPI_Testall(recvRequestCount, recvRequestArr,&rf, recvRequestStatus);
-		//printf("%d\n",rf);
-		
+		t2_comm_wait_recv += MPI_Wtime();		
 
+		t1_outer_comp += MPI_Wtime();
 		/* calculate filter for outer with the halo points received 
 		 * process coordinates are given in order to detect what part of the image
 		 * the process holds
 		**/
 		outerImageFilter(data,results,coords);
+		t2_outer_comp += MPI_Wtime();
 
 
-
+		t1_comm_wait_send += MPI_Wtime();
 		/* ensure all data have been sent successfully sent
 		 * before the next loop iteration */
-		
 		MPI_Waitall(sendRequestCount,sendRequestArr,MPI_STATUSES_IGNORE);
 		//MPI_Testall(sendRequestCount, sendRequestArr,&sf, recvRequestStatus);
-		//printf("%d\n",sf);
+		t2_comm_wait_send += MPI_Wtime();
 
 		swapImage(&data,&results);
 
 	}
 	
-	t2 = MPI_Wtime();
-
-    Dt_local = t2 - t1;
-	MPI_Reduce(&Dt_local, &Dt_total, 1, MPI_DOUBLE, MPI_MAX, 0, comm_cart);	
-	
-/* Elapsed times for the slowest process */
-	if (myRank == 0) {
-		
-		printf("Max. Total time: Dt = %.3f msec.\n\n", Dt_total * 1000);
-	}
-
-
+	tIOwrite1 += MPI_Wtime();
 
 	MPI_File output;
 
 
-
-
-
-	MPI_File_open(comm_cart,"../out.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
+	MPI_File_open(comm_cart,"./out.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
 	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
     MPI_File_write_all(output, data,1,ARRAY,&fileStatus);
 
     MPI_File_close(&output);  
+
+    tIOwrite2 += MPI_Wtime();
+
+    t2 = MPI_Wtime();
+
+    Dt_local = t2 - t1;
+	MPI_Reduce(&Dt_local, &Dt_total, 1, MPI_DOUBLE, MPI_MAX, 0, comm_cart);	
+	DtIO_local = (tIOread2 - tIOread1) + (tIOwrite2 - tIOwrite1);
+	MPI_Reduce(&DtIO_local, &DtIO_total, 1, MPI_DOUBLE, MPI_MAX, 0, comm_cart);
+	Dt_local_comp = (t2_inner_comp - t1_inner_comp) + (t2_outer_comp - t1_outer_comp);
+	MPI_Reduce(&Dt_local_comp, &Dt_total_comp, 1, MPI_DOUBLE, MPI_MAX, 0, comm_cart);
+	Dt_local_comm = (t2_comm_sendrecv - t1_comm_sendrecv)+ (t2_comm_wait_recv - t1_comm_wait_recv)+ (t2_comm_wait_send - t1_comm_wait_send);
+	MPI_Reduce(&Dt_local_comm, &Dt_total_comm, 1, MPI_DOUBLE, MPI_MAX, 0, comm_cart);
+
+	
+	/* Elapsed times for the slowest process */
+	if (myRank == 0) {
+		
+		printf("Max. Total time: Dt = %.3f msec.\n", Dt_total * 1000);
+		printf("Max. IO time(r+w): Dt = %.3f msec.\n", DtIO_total * 1000);
+		printf("Max. communication time: Dt = %.3f msec.\n", Dt_total_comm * 1000);
+		printf("Max. computation time:Dt = %.3f msec.\n", Dt_total_comp * 1000);
+	}
 
 
 
