@@ -69,6 +69,7 @@ int main(int argc, char* argv[])
 			Dt_local_comm, Dt_total_comm;
 	double t1_inner_comp = 0, t2_inner_comp = 0, t1_outer_comp = 0, t2_outer_comp = 0,
 			Dt_local_comp, Dt_total_comp;
+	int local_dif, total_dif;
 
 
 	int sf;
@@ -410,7 +411,7 @@ int main(int argc, char* argv[])
 
 		t1_inner_comp += MPI_Wtime();
 		/* calculate filter for inner data - no need for communication */
-		innerImageFilter(data,results);
+		local_dif = innerImageFilter(data,results);
 		t2_inner_comp += MPI_Wtime();
 		
 
@@ -429,6 +430,15 @@ int main(int argc, char* argv[])
 		**/
 		outerImageFilter(data,results,coords);
 		t2_outer_comp += MPI_Wtime();
+
+		/* global communication every N steps to decide if result has converged */
+		if (steps % reduceFreq == 0) {
+			MPI_Reduce(&local_dif, &total_dif, 1, MPI_INT, MPI_SUM, 0, comm_cart);
+			if (myRank == 0) {
+				printf("reduced difference %d\n", total_dif);
+			}
+		}		
+
 
 
 		t1_comm_wait_send += MPI_Wtime();
@@ -512,18 +522,27 @@ void swapImage(unsigned char** data,unsigned char** results)
 
 int innerImageFilter(unsigned char *data,unsigned char* results)
 {
+	int different = 0;
+
 	for(k = 0; k<depth; k++)
 	{
-//#pragma omp parallel for collaper(2)
+//#pragma omp parallel for collapse(2)
 		for(i = 2; i < height; i++)
 		{
 			for(j = 2; j < width; j++)
 			{
 				results[offset(i,j,k)] = innerPixelFilter(data,i,j,k);
+				if(different == 0)
+				{ 
+					if(results[offset(i,j,k)] != data[offset(i,j,k)])
+					{
+						different = 1;
+					}
+				}
 			}
 		}
 	}
-	return 1;
+	return different;
 }
 
 unsigned char innerPixelFilter(unsigned char* data,int i, int j, int k)
@@ -535,7 +554,7 @@ unsigned char innerPixelFilter(unsigned char* data,int i, int j, int k)
 	{
 		for(l=-1;l<=1;l++)
 		{
-				outPixel += (data[offset((i+m),(j+l),k)]*filter[m+1][l+1]);
+			outPixel += (data[offset((i+m),(j+l),k)]*filter[m+1][l+1]);
 		}
 	}
 	return (unsigned char)(outPixel/16);
