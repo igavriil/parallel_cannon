@@ -4,6 +4,7 @@
 #include <math.h>
 #include <mpi.h>
 #include <omp.h>
+#include <time.h>
 
 /* number of processes */
 int numtasks;
@@ -141,8 +142,9 @@ int main(int argc, char* argv[])
 		printf("Sub-grid / process: %dx%dx%d.\n", width, height,depth);
 		printf("Sub-grid datasize: %d\n",(width+2)*(height+2)*depth);
 		printf("\nC = %d iterations.\n", totalSteps);
-		printf("Reduction performed every %d iteration(s).\n", reduceFreq);
-		printf("Input file path %s\n", imagePath);
+		printf("Reduction performed every %d iteration(s).,\n", reduceFreq);
+		printf("Input file path %s ,%d\n", imagePath,strcmp(imagePath,"none"));
+
 	}
 
 	/* There's not communication wraparound in the model. Outter image pixels are
@@ -173,6 +175,7 @@ int main(int argc, char* argv[])
 	**/ 
 	data = calloc(dataSize, sizeof(unsigned char));
 	results = calloc(dataSize, sizeof(unsigned char));
+
 
 	tIOread1 += MPI_Wtime();
 	/* find process rank using the cartesian coordinates and assigh the appropiate
@@ -208,13 +211,27 @@ int main(int argc, char* argv[])
     MPI_Type_create_subarray(sub_dims, array_of_sizes, array_of_subsizes,array_of_starts, MPI_ORDER_C, MPI_UNSIGNED_CHAR, &FILETYPE);
     MPI_Type_commit(&FILETYPE);
 
+    if(strcmp(imagePath,"none") != 0)
+    {
+		MPI_File_open(comm_cart,imagePath,MPI_MODE_RDWR,MPI_INFO_NULL,&image);
+		fileOffset = 0;
+		MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
+	    MPI_File_read_all(image, data,1,ARRAY,&fileStatus);
 
-	MPI_File_open(comm_cart,imagePath,MPI_MODE_RDWR,MPI_INFO_NULL,&image);
-	fileOffset = 0;
-	MPI_File_set_view(image,fileOffset,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
-    MPI_File_read_all(image, data,1,ARRAY,&fileStatus);
-
-    MPI_File_close(&image);
+	    MPI_File_close(&image);
+	}
+	else
+	{
+		srand(time(NULL));
+		for (k = 0; k < depth; k++) {
+			for (i = 1; i < height + 1; i++) {
+				for (j = 1; j < width + 1; j++) {
+					/* generate random value from 10 to 1000 for node (i,j,k) */
+					data[offset(i, j, k)] = rand()%256;
+				}
+			}
+		}
+	}
 
     tIOread2 += MPI_Wtime();
 
@@ -283,7 +300,8 @@ int main(int argc, char* argv[])
 		MPI_Errhandler_set(comm_cart, MPI_ERRORS_RETURN);
 	}
 
-	while (steps < totalSteps)
+	total_dif = numtasks;
+	while (steps < totalSteps && total_dif != 0)
 	{
 		recvRequestCount = 0;
 		sendRequestCount = 0;
@@ -431,16 +449,6 @@ int main(int argc, char* argv[])
 		outerImageFilter(data,results,coords);
 		t2_outer_comp += MPI_Wtime();
 
-		/* global communication every N steps to decide if result has converged */
-		if (steps % reduceFreq == 0) {
-			MPI_Reduce(&local_dif, &total_dif, 1, MPI_INT, MPI_SUM, 0, comm_cart);
-			if (myRank == 0) {
-				printf("reduced difference %d\n", total_dif);
-			}
-		}		
-
-
-
 		t1_comm_wait_send += MPI_Wtime();
 		/* ensure all data have been sent successfully sent
 		 * before the next loop iteration */
@@ -450,18 +458,28 @@ int main(int argc, char* argv[])
 
 		swapImage(&data,&results);
 
+		/* global communication every N steps to decide if result has converged */
+		if (steps % reduceFreq == 0) {
+			MPI_Allreduce(&local_dif, &total_dif, 1, MPI_INT, MPI_SUM, comm_cart);
+			if (myRank == 0) {
+				printf("reduced difference %d\n", total_dif);
+			}
+		}		
+
 	}
 	
 	tIOwrite1 += MPI_Wtime();
 
 	MPI_File output;
 
+	if(strcmp(imagePath,"none") != 0)
+    {
+		MPI_File_open(comm_cart,"./out.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
+		MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
+	    MPI_File_write_all(output, data,1,ARRAY,&fileStatus);
 
-	MPI_File_open(comm_cart,"./out.raw",MPI_MODE_CREATE | MPI_MODE_WRONLY,MPI_INFO_NULL,&output);
-	MPI_File_set_view(output,0,MPI_UNSIGNED_CHAR,FILETYPE,"native",MPI_INFO_NULL);
-    MPI_File_write_all(output, data,1,ARRAY,&fileStatus);
-
-    MPI_File_close(&output);  
+	    MPI_File_close(&output);  
+	}	
 
     tIOwrite2 += MPI_Wtime();
 
